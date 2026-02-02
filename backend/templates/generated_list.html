@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}생성 대출약정서 목록 - 대출약정서 관리 시스템{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>생성 대출약정서 목록</h1>
+    <p class="subtitle">AI로 생성한 대출약정서를 관리하세요.</p>
+</div>
+
+<!-- 새 약정서 생성 섹션 -->
+<section class="create-section card">
+    <h2>새 생성 약정서 만들기</h2>
+    <form id="createForm">
+        <div class="form-group">
+            <label for="agreementName">약정서 이름 *</label>
+            <input type="text" id="agreementName" name="name" required placeholder="예: 신규 프로젝트 대출약정서">
+        </div>
+        <div class="form-group">
+            <label for="agreementDescription">설명</label>
+            <textarea id="agreementDescription" name="description" rows="2" placeholder="약정서에 대한 설명 (선택)"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="baseAgreement">참조 원본 약정서 (선택)</label>
+            <select id="baseAgreement" name="base_agreement_id">
+                <option value="">선택 안함</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">생성</button>
+    </form>
+    <div id="createMessage" class="message hidden"></div>
+</section>
+
+<!-- 약정서 목록 섹션 -->
+<section class="agreements-section">
+    <h2>생성된 약정서</h2>
+    <div id="generatedList" class="agreements-list">
+        <div class="loading">로딩 중...</div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const createForm = document.getElementById('createForm');
+    const createMessage = document.getElementById('createMessage');
+    const generatedList = document.getElementById('generatedList');
+    const baseAgreementSelect = document.getElementById('baseAgreement');
+
+    // 원본 약정서 목록 로드
+    async function loadBaseAgreements() {
+        try {
+            const response = await fetch('/api/agreements/');
+            const agreements = await response.json();
+
+            agreements.forEach(a => {
+                const option = document.createElement('option');
+                option.value = a.id;
+                option.textContent = a.name;
+                baseAgreementSelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('원본 약정서 로드 실패:', error);
+        }
+    }
+
+    // 새 약정서 생성
+    createForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = {
+            name: document.getElementById('agreementName').value,
+            description: document.getElementById('agreementDescription').value || null,
+            base_agreement_id: document.getElementById('baseAgreement').value || null
+        };
+
+        if (formData.base_agreement_id) {
+            formData.base_agreement_id = parseInt(formData.base_agreement_id);
+        }
+
+        try {
+            const response = await fetch('/api/generated/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showMessage(`"${data.name}" 약정서가 생성되었습니다.`, 'success');
+                createForm.reset();
+                loadGeneratedAgreements();
+            } else {
+                showMessage(data.detail || '생성 실패', 'error');
+            }
+        } catch (error) {
+            showMessage('생성 중 오류가 발생했습니다.', 'error');
+        }
+    });
+
+    function showMessage(text, type) {
+        createMessage.textContent = text;
+        createMessage.className = `message ${type}`;
+        createMessage.classList.remove('hidden');
+        setTimeout(() => createMessage.classList.add('hidden'), 5000);
+    }
+
+    // 생성 약정서 목록 로드
+    async function loadGeneratedAgreements() {
+        try {
+            const response = await fetch('/api/generated/');
+            const agreements = await response.json();
+
+            if (agreements.length === 0) {
+                generatedList.innerHTML = '<p class="empty-message">생성된 약정서가 없습니다. 새 약정서를 만들어보세요.</p>';
+                return;
+            }
+
+            generatedList.innerHTML = agreements.map(a => `
+                <div class="agreement-card card">
+                    <div class="agreement-info">
+                        <h3><a href="/generated/${a.id}">${escapeHtml(a.name)}</a></h3>
+                        <p class="meta">
+                            <span>생성 조항 ${a.article_count}개</span>
+                            <span>생성일 ${formatDate(a.created_at)}</span>
+                        </p>
+                        ${a.description ? `<p class="description">${escapeHtml(a.description)}</p>` : ''}
+                    </div>
+                    <div class="agreement-actions">
+                        <a href="/generated/${a.id}" class="btn btn-secondary">조회</a>
+                        <a href="/generate" class="btn btn-primary">조항 추가</a>
+                        <button class="btn btn-danger" onclick="deleteAgreement(${a.id}, '${escapeHtml(a.name)}')">삭제</button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            generatedList.innerHTML = '<p class="error-message">목록을 불러올 수 없습니다.</p>';
+        }
+    }
+
+    // 약정서 삭제
+    window.deleteAgreement = async function(id, name) {
+        if (!confirm(`"${name}" 약정서를 삭제하시겠습니까?\n모든 생성된 조/항 데이터가 함께 삭제됩니다.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/generated/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                loadGeneratedAgreements();
+            } else {
+                alert('삭제에 실패했습니다.');
+            }
+        } catch (error) {
+            alert('삭제 중 오류가 발생했습니다.');
+        }
+    };
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('ko-KR');
+    }
+
+    // 초기 로드
+    loadBaseAgreements();
+    loadGeneratedAgreements();
+});
+</script>
+{% endblock %}

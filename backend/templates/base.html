@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}대출약정서 생성 시스템{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="nav-brand">
+                <a href="/">대출약정서 생성 시스템</a>
+            </div>
+            <div class="nav-menu">
+                <a href="/" class="nav-link {% block nav_reference %}{% endblock %}">기준약정서</a>
+                <a href="/work" class="nav-link {% block nav_work %}{% endblock %}">작업약정서</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

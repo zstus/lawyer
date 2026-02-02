@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}작업약정서 상세 - 대출약정서 생성 시스템{% endblock %}
+
+{% block nav_work %}active{% endblock %}
+
+{% block content %}
+<div class="detail-page">
+    <!-- 헤더 -->
+    <div class="detail-header">
+        <div class="detail-header-left">
+            <h1 id="agreementTitle" class="detail-title">로딩 중...</h1>
+            <div class="detail-meta">
+                <span id="agreementDate"></span>
+            </div>
+        </div>
+        <div class="detail-header-right">
+            <button id="addArticleBtn" class="btn btn-primary">조항추가</button>
+        </div>
+    </div>
+
+    <!-- 조/항 목록 (아코디언) -->
+    <div id="articlesList" class="articles-accordion">
+        <div class="loading">로딩 중...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const agreementId = {{ agreement_id }};
+    const articlesList = document.getElementById('articlesList');
+    const addArticleBtn = document.getElementById('addArticleBtn');
+
+    // 조항추가 버튼 클릭
+    addArticleBtn.addEventListener('click', function() {
+        window.location.href = `/work/${agreementId}/add-article`;
+    });
+
+    async function loadAgreement() {
+        try {
+            const response = await fetch(`/api/generated/${agreementId}`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    articlesList.innerHTML = '<p class="error-message">약정서를 찾을 수 없습니다.</p>';
+                    return;
+                }
+                throw new Error('Failed to load');
+            }
+
+            const agreement = await response.json();
+
+            // 헤더 업데이트
+            document.getElementById('agreementTitle').textContent = agreement.name;
+            document.getElementById('agreementDate').textContent = `생성일 ${formatDate(agreement.created_at)}`;
+            document.title = `${agreement.name} - 대출약정서 생성 시스템`;
+
+            // 조 목록이 없는 경우
+            if (agreement.articles.length === 0) {
+                articlesList.innerHTML = '<p class="empty-message">생성된 조항이 없습니다. [조항추가] 버튼을 눌러 조항을 추가하세요.</p>';
+                return;
+            }
+
+            // 조/항 아코디언 생성
+            articlesList.innerHTML = agreement.articles.map(article => `
+                <div class="accordion-article" data-article-id="${article.id}">
+                    <div class="accordion-article-header" onclick="toggleArticle(this)">
+                        <span class="article-label">${article.article_number_display ? `제${article.article_number_display}조` : '(번호 미지정)'}</span>
+                        <span class="article-title">${escapeHtml(article.title || '(제목 없음)')}</span>
+                        <span class="article-date">생성일 ${formatDate(article.created_at)}</span>
+                        <button class="btn-delete" onclick="event.stopPropagation(); deleteArticle(${article.id})" title="조 삭제">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                        <svg class="accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="accordion-article-content" id="article-${article.id}">
+                        <div class="loading-clauses">항 목록 로딩 중...</div>
+                    </div>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            console.error(error);
+            articlesList.innerHTML = '<p class="error-message">데이터를 불러올 수 없습니다.</p>';
+        }
+    }
+
+    // 조 아코디언 토글
+    window.toggleArticle = async function(header) {
+        const content = header.nextElementSibling;
+        const isOpen = content.classList.contains('open');
+
+        if (isOpen) {
+            content.classList.remove('open');
+            header.classList.remove('open');
+        } else {
+            content.classList.add('open');
+            header.classList.add('open');
+
+            // 항 목록이 로드되지 않았으면 로드
+            if (content.querySelector('.loading-clauses')) {
+                const articleId = content.id.replace('article-', '');
+                await loadClauses(articleId, content);
+            }
+        }
+    };
+
+    // 항 목록 로드
+    async function loadClauses(articleId, container) {
+        try {
+            const response = await fetch(`/api/generated/${agreementId}/articles/${articleId}`);
+            const article = await response.json();
+
+            if (article.clauses.length === 0) {
+                container.innerHTML = '<p class="empty-clauses">항이 없습니다.</p>';
+                return;
+            }
+
+            container.innerHTML = article.clauses.map(clause => `
+                <div class="accordion-clause" data-clause-id="${clause.id}">
+                    <div class="accordion-clause-header" onclick="toggleClause(this)">
+                        <span class="clause-label">${clause.clause_number_display ? `제${clause.clause_number_display}항` : '(번호 미지정)'}</span>
+                        <span class="clause-title">${escapeHtml(clause.title || '(제목 없음)')}</span>
+                        <span class="clause-date">생성일 ${formatDate(clause.created_at)}</span>
+                        <button class="btn-delete btn-delete-small" onclick="event.stopPropagation(); deleteClause(${articleId}, ${clause.id})" title="항 삭제">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                        <svg class="accordion-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                    <div class="accordion-clause-content">
+                        <div class="clause-content-text">${formatClauseContent(clause.content)}</div>
+                    </div>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            container.innerHTML = '<p class="error-message">항 목록을 불러올 수 없습니다.</p>';
+        }
+    }
+
+    // 항 아코디언 토글
+    window.toggleClause = function(header) {
+        const content = header.nextElementSibling;
+        const isOpen = content.classList.contains('open');
+
+        if (isOpen) {
+            content.classList.remove('open');
+            header.classList.remove('open');
+        } else {
+            content.classList.add('open');
+            header.classList.add('open');
+        }
+    };
+
+    function formatClauseContent(content) {
+        if (!content) return '<p class="no-content">(내용 없음)</p>';
+
+        let text = '';
+        if (typeof content === 'string') {
+            text = content;
+        } else if (content.text) {
+            text = content.text;
+        } else if (content.lines && content.lines.length > 0) {
+            text = content.lines.join('\n');
+        }
+
+        if (!text) return '<p class="no-content">(내용 없음)</p>';
+
+        // 줄바꿈을 <br>로 변환하고 단락 처리
+        return text.split('\n').map(line =>
+            `<p>${escapeHtml(line) || '&nbsp;'}</p>`
+        ).join('');
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    }
+
+    // 조 삭제
+    window.deleteArticle = async function(articleId) {
+        if (!confirm('이 조를 삭제하시겠습니까? 포함된 모든 항도 함께 삭제됩니다.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/generated/${agreementId}/articles/${articleId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('삭제 실패');
+            }
+
+            // 화면에서 해당 조 제거
+            const articleElement = document.querySelector(`[data-article-id="${articleId}"]`);
+            if (articleElement) {
+                articleElement.remove();
+            }
+
+            // 남은 조가 없으면 빈 메시지 표시
+            if (articlesList.querySelectorAll('.accordion-article').length === 0) {
+                articlesList.innerHTML = '<p class="empty-message">생성된 조항이 없습니다. [조항추가] 버튼을 눌러 조항을 추가하세요.</p>';
+            }
+
+        } catch (error) {
+            alert('삭제 중 오류가 발생했습니다: ' + error.message);
+        }
+    };
+
+    // 항 삭제
+    window.deleteClause = async function(articleId, clauseId) {
+        if (!confirm('이 항을 삭제하시겠습니까?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/generated/${agreementId}/articles/${articleId}/clauses/${clauseId}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                throw new Error('삭제 실패');
+            }
+
+            // 화면에서 해당 항 제거
+            const clauseElement = document.querySelector(`[data-clause-id="${clauseId}"]`);
+            if (clauseElement) {
+                clauseElement.remove();
+            }
+
+            // 남은 항이 없으면 빈 메시지 표시
+            const container = document.getElementById(`article-${articleId}`);
+            if (container && container.querySelectorAll('.accordion-clause').length === 0) {
+                container.innerHTML = '<p class="empty-clauses">항이 없습니다.</p>';
+            }
+
+        } catch (error) {
+            alert('삭제 중 오류가 발생했습니다: ' + error.message);
+        }
+    };
+
+    // 초기 로드
+    loadAgreement();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}약정서 상세 - 대출약정서 관리 시스템{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">🏠 홈</a> &gt; <span id="agreementName">약정서</span>
+</div>
+
+<div class="page-header" id="headerSection">
+    <h1 id="agreementTitle">로딩 중...</h1>
+    <p class="subtitle" id="agreementMeta"></p>
+</div>
+
+<!-- 조 목록 섹션 -->
+<section class="articles-section">
+    <h2>📑 조(Article) 목록</h2>
+    <p class="section-description">조를 클릭하면 해당 조의 항 목록을 볼 수 있습니다.</p>
+
+    <div id="articlesList" class="articles-list">
+        <div class="loading">로딩 중...</div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const agreementId = {{ agreement_id }};
+    const articlesList = document.getElementById('articlesList');
+
+    async function loadAgreement() {
+        try {
+            const response = await fetch(`/api/agreements/${agreementId}`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    articlesList.innerHTML = '<p class="error-message">약정서를 찾을 수 없습니다.</p>';
+                    return;
+                }
+                throw new Error('Failed to load');
+            }
+
+            const agreement = await response.json();
+
+            // 헤더 업데이트
+            document.getElementById('agreementName').textContent = agreement.name;
+            document.getElementById('agreementTitle').textContent = agreement.name;
+            document.getElementById('agreementMeta').innerHTML = `
+                📄 ${escapeHtml(agreement.file_name)} |
+                📑 총 ${agreement.article_count}개 조항 |
+                🕐 ${formatDate(agreement.created_at)}
+            `;
+            document.title = `${agreement.name} - 대출약정서 관리 시스템`;
+
+            // 조 목록 표시
+            if (agreement.articles.length === 0) {
+                articlesList.innerHTML = '<p class="empty-message">조항이 없습니다.</p>';
+                return;
+            }
+
+            articlesList.innerHTML = agreement.articles.map(article => `
+                <div class="article-card card" onclick="location.href='/agreement/${agreementId}/article/${article.id}'">
+                    <div class="article-number">제 ${article.article_number_display} 조</div>
+                    <div class="article-info">
+                        <h3>${escapeHtml(article.title)}</h3>
+                        <p class="meta">
+                            <span>📝 ${article.clause_count}개 항</span>
+                        </p>
+                    </div>
+                    <div class="article-arrow">▶</div>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            articlesList.innerHTML = '<p class="error-message">데이터를 불러올 수 없습니다.</p>';
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('ko-KR');
+    }
+
+    loadAgreement();
+});
+</script>
+{% endblock %}

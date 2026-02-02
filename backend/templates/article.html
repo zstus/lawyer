@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}조 상세 - 대출약정서 관리 시스템{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">🏠 홈</a> &gt;
+    <a href="/agreement/{{ agreement_id }}" id="agreementLink">약정서</a> &gt;
+    <span id="articleName">조</span>
+</div>
+
+<div class="page-header" id="headerSection">
+    <h1 id="articleTitle">로딩 중...</h1>
+    <p class="subtitle" id="articleMeta"></p>
+</div>
+
+<!-- 항 목록 섹션 -->
+<section class="clauses-section">
+    <h2>📝 항(Clause) 목록</h2>
+    <p class="section-description">항을 클릭하면 해당 항의 내용을 볼 수 있습니다.</p>
+
+    <div id="clausesList" class="clauses-list">
+        <div class="loading">로딩 중...</div>
+    </div>
+</section>
+
+<!-- 항 내용 모달 -->
+<div id="clauseModal" class="modal hidden">
+    <div class="modal-overlay" onclick="closeModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">항 내용</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="modalBody">
+            <!-- 항 내용이 표시될 곳 -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const agreementId = {{ agreement_id }};
+    const articleId = {{ article_id }};
+    const clausesList = document.getElementById('clausesList');
+    const modal = document.getElementById('clauseModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+
+    async function loadArticle() {
+        try {
+            // 약정서 정보 로드
+            const agreementResponse = await fetch(`/api/agreements/${agreementId}`);
+            if (agreementResponse.ok) {
+                const agreement = await agreementResponse.json();
+                document.getElementById('agreementLink').textContent = agreement.name;
+            }
+
+            // 조 정보 로드
+            const response = await fetch(`/api/agreements/${agreementId}/articles/${articleId}`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    clausesList.innerHTML = '<p class="error-message">조를 찾을 수 없습니다.</p>';
+                    return;
+                }
+                throw new Error('Failed to load');
+            }
+
+            const article = await response.json();
+
+            // 헤더 업데이트
+            document.getElementById('articleName').textContent = `제 ${article.article_number_display} 조`;
+            document.getElementById('articleTitle').textContent = `제 ${article.article_number_display} 조 ${article.title}`;
+            document.getElementById('articleMeta').textContent = `📝 총 ${article.clause_count}개 항`;
+            document.title = `제 ${article.article_number_display} 조 ${article.title} - 대출약정서 관리 시스템`;
+
+            // 항 목록 표시
+            if (article.clauses.length === 0) {
+                clausesList.innerHTML = '<p class="empty-message">항이 없습니다.</p>';
+                return;
+            }
+
+            clausesList.innerHTML = article.clauses.map(clause => `
+                <div class="clause-card card" onclick="showClauseContent(${JSON.stringify(clause).replace(/"/g, '&quot;')})">
+                    <div class="clause-number">제 ${clause.clause_number_display} 항</div>
+                    <div class="clause-info">
+                        <h3>${escapeHtml(clause.title)}</h3>
+                        <p class="preview">${getContentPreview(clause.content)}</p>
+                    </div>
+                    <div class="clause-arrow">▶</div>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            console.error(error);
+            clausesList.innerHTML = '<p class="error-message">데이터를 불러올 수 없습니다.</p>';
+        }
+    }
+
+    function getContentPreview(content) {
+        if (!content) return '(내용 없음)';
+
+        let text = '';
+        if (content.text) {
+            text = content.text;
+        } else if (content.lines && content.lines.length > 0) {
+            text = content.lines.join(' ');
+        } else if (typeof content === 'string') {
+            text = content;
+        }
+
+        // 미리보기: 첫 100자
+        if (text.length > 100) {
+            return escapeHtml(text.substring(0, 100)) + '...';
+        }
+        return escapeHtml(text);
+    }
+
+    window.showClauseContent = function(clause) {
+        modalTitle.textContent = `제 ${clause.clause_number_display} 항 ${clause.title}`;
+
+        let contentHtml = '';
+        if (clause.content) {
+            if (clause.content.lines && clause.content.lines.length > 0) {
+                contentHtml = clause.content.lines.map(line => `<p>${escapeHtml(line)}</p>`).join('');
+            } else if (clause.content.text) {
+                contentHtml = `<p>${escapeHtml(clause.content.text).replace(/\n/g, '<br>')}</p>`;
+            } else if (typeof clause.content === 'string') {
+                contentHtml = `<p>${escapeHtml(clause.content).replace(/\n/g, '<br>')}</p>`;
+            }
+        }
+
+        if (!contentHtml) {
+            contentHtml = '<p class="empty-message">(내용 없음)</p>';
+        }
+
+        modalBody.innerHTML = contentHtml;
+        modal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    };
+
+    window.closeModal = function() {
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+    };
+
+    // ESC 키로 모달 닫기
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            closeModal();
+        }
+    });
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    loadArticle();
+});
+</script>
+{% endblock %}

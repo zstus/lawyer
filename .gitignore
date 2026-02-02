@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# 환경설정
+.env
+*.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 데이터베이스
+*.db
+data/*.db
+
+# 업로드 파일
+uploads/
+
+# 참조 파일 (프로젝트 외)
+ref/
+변호사교육자료/

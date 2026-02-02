@@ -1,0 +1,587 @@
+{% extends "base.html" %}
+
+{% block title %}대출약정서 항목 생성 - 대출약정서 관리 시스템{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>대출약정서 항목 생성</h1>
+    <p class="subtitle">Term Sheet 정보를 입력하고, 참조할 대출약정서의 조/항을 선택하여 새로운 조항 생성 프롬프트를 만드세요.</p>
+</div>
+
+<div class="generate-container">
+    <!-- Step 1: Term Sheet 입력 -->
+    <section class="step-section card">
+        <h2>1단계: Term Sheet 정보 입력</h2>
+        <p class="step-description">생성하려는 조항에 필요한 Term Sheet의 관련 정보를 붙여넣으세요.</p>
+        <textarea
+            id="termSheetText"
+            class="term-sheet-input"
+            placeholder="예시:
+- 대출금액: 금 오십억원 (￦5,000,000,000)
+- 대출기간: 2024년 10월 1일 ~ 2039년 9월 30일 (15년)
+- 이자율: CD금리 + 2.5% (연간)
+- 상환방식: 원리금균등분할상환
+- 차주: 주식회사 OOO태양광
+- 대주: OO은행
+..."
+            rows="10"
+        ></textarea>
+    </section>
+
+    <!-- Step 2: 대출약정서 선택 -->
+    <section class="step-section card">
+        <h2>2단계: 참조 대출약정서 선택</h2>
+        <p class="step-description">새 조항의 구조를 참조할 기존 대출약정서를 선택하세요.</p>
+        <select id="agreementSelect" class="select-input">
+            <option value="">대출약정서를 선택하세요</option>
+        </select>
+    </section>
+
+    <!-- Step 3: 조 선택 -->
+    <section class="step-section card" id="articleSection" style="display: none;">
+        <h2>3단계: 조(Article) 선택</h2>
+        <p class="step-description">참조할 조를 선택하세요.</p>
+        <select id="articleSelect" class="select-input">
+            <option value="">조를 선택하세요</option>
+        </select>
+    </section>
+
+    <!-- Step 4: 항 선택 (선택적) -->
+    <section class="step-section card" id="clauseSection" style="display: none;">
+        <h2>4단계: 항(Clause) 선택 (선택사항)</h2>
+        <p class="step-description">특정 항만 참조하려면 선택하세요. 선택하지 않으면 모든 항을 참조합니다.</p>
+        <select id="clauseSelect" class="select-input">
+            <option value="">전체 항 참조 (기본)</option>
+        </select>
+    </section>
+
+    <!-- Step 5: 저장할 생성 약정서 선택 -->
+    <section class="step-section card" id="generatedSection" style="display: none;">
+        <h2>5단계: 저장할 생성 약정서 선택</h2>
+        <p class="step-description">AI 결과를 저장할 생성 약정서를 선택하거나 새로 만드세요.</p>
+        <div class="form-row">
+            <select id="generatedSelect" class="select-input">
+                <option value="">기존 생성 약정서 선택</option>
+            </select>
+            <span class="or-text">또는</span>
+            <input type="text" id="newGeneratedName" class="text-input" placeholder="새 생성 약정서 이름 입력">
+            <button type="button" id="createGeneratedBtn" class="btn btn-secondary" style="display: none;">생성</button>
+        </div>
+        <p class="help-text" id="generatedHelpText"></p>
+    </section>
+
+    <!-- 생성 버튼 -->
+    <section class="action-section">
+        <button id="generateBtn" class="btn btn-primary btn-large" disabled>
+            프롬프트 생성
+        </button>
+    </section>
+
+    <!-- 결과 영역 -->
+    <section class="result-section card" id="resultSection" style="display: none;">
+        <h2>생성된 프롬프트</h2>
+        <div class="result-meta" id="resultMeta"></div>
+        <div class="result-prompt-container">
+            <div class="result-actions">
+                <button id="copyBtn" class="btn btn-secondary">복사</button>
+                <button id="chatgptBtn" class="btn btn-primary" style="display: none;">ChatGPT 호출하여 저장</button>
+                <button id="saveResultBtn" class="btn btn-secondary" style="display: none;">수동 저장</button>
+            </div>
+            <pre class="result-prompt" id="resultPrompt"></pre>
+        </div>
+        <!-- ChatGPT 결과 표시 영역 -->
+        <div id="chatgptResultSection" style="display: none;">
+            <h3>ChatGPT 생성 결과</h3>
+            <div class="chatgpt-result-container">
+                <pre class="chatgpt-result" id="chatgptResult"></pre>
+            </div>
+            <p class="success-message" id="saveSuccessMessage"></p>
+        </div>
+    </section>
+
+    <!-- AI 결과 입력 모달 -->
+    <div id="saveModal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeSaveModal()"></div>
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3>AI 결과 저장</h3>
+                <button class="modal-close" onclick="closeSaveModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">AI가 생성한 결과를 아래에 붙여넣고 저장하세요.</p>
+                <div class="form-group">
+                    <label for="articleNumberInput">조 번호 (예: 1, 2, 1의2)</label>
+                    <input type="text" id="articleNumberInput" placeholder="예: 1">
+                </div>
+                <div class="form-group">
+                    <label for="articleTitleInput">조 제목</label>
+                    <input type="text" id="articleTitleInput" placeholder="예: 대출금액">
+                </div>
+                <div class="form-group">
+                    <label for="aiResultInput">AI 생성 결과</label>
+                    <textarea id="aiResultInput" rows="15" placeholder="AI가 생성한 조항 내용을 붙여넣으세요..."></textarea>
+                </div>
+                <div class="btn-group">
+                    <button type="button" id="confirmSaveBtn" class="btn btn-primary">저장</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeSaveModal()">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const termSheetText = document.getElementById('termSheetText');
+    const agreementSelect = document.getElementById('agreementSelect');
+    const articleSection = document.getElementById('articleSection');
+    const articleSelect = document.getElementById('articleSelect');
+    const clauseSection = document.getElementById('clauseSection');
+    const clauseSelect = document.getElementById('clauseSelect');
+    const generatedSection = document.getElementById('generatedSection');
+    const generatedSelect = document.getElementById('generatedSelect');
+    const newGeneratedName = document.getElementById('newGeneratedName');
+    const createGeneratedBtn = document.getElementById('createGeneratedBtn');
+    const generatedHelpText = document.getElementById('generatedHelpText');
+    const generateBtn = document.getElementById('generateBtn');
+    const resultSection = document.getElementById('resultSection');
+    const resultMeta = document.getElementById('resultMeta');
+    const resultPrompt = document.getElementById('resultPrompt');
+    const copyBtn = document.getElementById('copyBtn');
+    const chatgptBtn = document.getElementById('chatgptBtn');
+    const saveResultBtn = document.getElementById('saveResultBtn');
+    const saveModal = document.getElementById('saveModal');
+    const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+    const chatgptResultSection = document.getElementById('chatgptResultSection');
+    const chatgptResult = document.getElementById('chatgptResult');
+    const saveSuccessMessage = document.getElementById('saveSuccessMessage');
+
+    let currentGeneratedId = null;
+    let currentReferenceData = null;
+    let apiKeyConfigured = false;
+
+    // API 키 상태 확인
+    async function checkApiStatus() {
+        try {
+            const response = await fetch('/api/generated/api-status');
+            const data = await response.json();
+            apiKeyConfigured = data.configured;
+        } catch (error) {
+            console.error('API 상태 확인 실패:', error);
+            apiKeyConfigured = false;
+        }
+    }
+
+    // 대출약정서 목록 로드
+    async function loadAgreements() {
+        try {
+            const response = await fetch('/api/agreements/');
+            const agreements = await response.json();
+
+            agreementSelect.innerHTML = '<option value="">대출약정서를 선택하세요</option>';
+            agreements.forEach(a => {
+                agreementSelect.innerHTML += `<option value="${a.id}">${escapeHtml(a.name)} (${a.article_count}개 조)</option>`;
+            });
+        } catch (error) {
+            console.error('약정서 목록 로드 실패:', error);
+        }
+    }
+
+    // 생성 약정서 목록 로드
+    async function loadGeneratedAgreements() {
+        try {
+            const response = await fetch('/api/generated/');
+            const agreements = await response.json();
+
+            generatedSelect.innerHTML = '<option value="">기존 생성 약정서 선택</option>';
+            agreements.forEach(a => {
+                generatedSelect.innerHTML += `<option value="${a.id}">${escapeHtml(a.name)} (${a.article_count}개 조)</option>`;
+            });
+        } catch (error) {
+            console.error('생성 약정서 목록 로드 실패:', error);
+        }
+    }
+
+    // 조 목록 로드
+    async function loadArticles(agreementId) {
+        try {
+            const response = await fetch(`/api/agreements/${agreementId}/articles`);
+            const articles = await response.json();
+
+            articleSelect.innerHTML = '<option value="">조를 선택하세요</option>';
+            articles.forEach(a => {
+                articleSelect.innerHTML += `<option value="${a.id}">제${a.article_number_display}조 ${escapeHtml(a.title)} (${a.clause_count}개 항)</option>`;
+            });
+
+            articleSection.style.display = 'block';
+            clauseSection.style.display = 'none';
+            generatedSection.style.display = 'none';
+            clauseSelect.innerHTML = '<option value="">전체 항 참조 (기본)</option>';
+        } catch (error) {
+            console.error('조 목록 로드 실패:', error);
+        }
+    }
+
+    // 항 목록 로드
+    async function loadClauses(agreementId, articleId) {
+        try {
+            const response = await fetch(`/api/agreements/${agreementId}/articles/${articleId}/clauses`);
+            const clauses = await response.json();
+
+            clauseSelect.innerHTML = '<option value="">전체 항 참조 (기본)</option>';
+            clauses.forEach(c => {
+                clauseSelect.innerHTML += `<option value="${c.id}">제${c.clause_number_display}항 ${escapeHtml(c.title)}</option>`;
+            });
+
+            clauseSection.style.display = 'block';
+            generatedSection.style.display = 'block';
+            loadGeneratedAgreements();
+        } catch (error) {
+            console.error('항 목록 로드 실패:', error);
+        }
+    }
+
+    // 생성 버튼 활성화 체크
+    function checkGenerateEnabled() {
+        const hasTermSheet = termSheetText.value.trim().length > 0;
+        const hasAgreement = agreementSelect.value !== '';
+        const hasArticle = articleSelect.value !== '';
+
+        generateBtn.disabled = !(hasTermSheet && hasAgreement && hasArticle);
+    }
+
+    // 저장 가능 여부 확인
+    function updateSaveButtonVisibility() {
+        const hasGenerated = generatedSelect.value !== '' || currentGeneratedId;
+        // ChatGPT 버튼: API 키 설정 + 생성 약정서 선택 시 표시
+        chatgptBtn.style.display = (hasGenerated && apiKeyConfigured) ? 'inline-block' : 'none';
+        // 수동 저장 버튼: 생성 약정서 선택 시 표시
+        saveResultBtn.style.display = hasGenerated ? 'inline-block' : 'none';
+    }
+
+    // 이벤트 리스너
+    termSheetText.addEventListener('input', checkGenerateEnabled);
+
+    agreementSelect.addEventListener('change', function() {
+        if (this.value) {
+            loadArticles(this.value);
+        } else {
+            articleSection.style.display = 'none';
+            clauseSection.style.display = 'none';
+            generatedSection.style.display = 'none';
+        }
+        checkGenerateEnabled();
+    });
+
+    articleSelect.addEventListener('change', function() {
+        if (this.value && agreementSelect.value) {
+            loadClauses(agreementSelect.value, this.value);
+        } else {
+            clauseSection.style.display = 'none';
+            generatedSection.style.display = 'none';
+        }
+        checkGenerateEnabled();
+    });
+
+    generatedSelect.addEventListener('change', function() {
+        if (this.value) {
+            currentGeneratedId = parseInt(this.value);
+            newGeneratedName.value = '';
+            createGeneratedBtn.style.display = 'none';
+            generatedHelpText.textContent = '선택한 생성 약정서에 AI 결과가 저장됩니다.';
+        } else {
+            currentGeneratedId = null;
+            generatedHelpText.textContent = '';
+        }
+        updateSaveButtonVisibility();
+    });
+
+    newGeneratedName.addEventListener('input', function() {
+        if (this.value.trim()) {
+            generatedSelect.value = '';
+            currentGeneratedId = null;
+            createGeneratedBtn.style.display = 'inline-block';
+            generatedHelpText.textContent = '"생성" 버튼을 눌러 새 생성 약정서를 만드세요.';
+        } else {
+            createGeneratedBtn.style.display = 'none';
+            generatedHelpText.textContent = '';
+        }
+        updateSaveButtonVisibility();
+    });
+
+    // 새 생성 약정서 만들기
+    createGeneratedBtn.addEventListener('click', async function() {
+        const name = newGeneratedName.value.trim();
+        if (!name) return;
+
+        try {
+            const response = await fetch('/api/generated/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    base_agreement_id: agreementSelect.value ? parseInt(agreementSelect.value) : null
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                currentGeneratedId = data.id;
+                newGeneratedName.value = '';
+                createGeneratedBtn.style.display = 'none';
+                generatedHelpText.innerHTML = `"<strong>${escapeHtml(data.name)}</strong>" 생성 약정서가 생성되었습니다. AI 결과가 여기에 저장됩니다.`;
+                loadGeneratedAgreements();
+                updateSaveButtonVisibility();
+            } else {
+                const error = await response.json();
+                alert(error.detail || '생성 실패');
+            }
+        } catch (error) {
+            alert('생성 중 오류가 발생했습니다.');
+        }
+    });
+
+    // 프롬프트 생성
+    generateBtn.addEventListener('click', async function() {
+        const requestData = {
+            term_sheet_text: termSheetText.value.trim(),
+            agreement_id: parseInt(agreementSelect.value),
+            article_id: parseInt(articleSelect.value),
+            clause_id: clauseSelect.value ? parseInt(clauseSelect.value) : null
+        };
+
+        generateBtn.disabled = true;
+        generateBtn.textContent = '생성 중...';
+
+        try {
+            const response = await fetch('/api/agreements/generate-prompt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '프롬프트 생성 실패');
+            }
+
+            const data = await response.json();
+
+            // 참조 데이터 저장
+            currentReferenceData = {
+                agreement_id: requestData.agreement_id,
+                article_id: requestData.article_id,
+                clause_id: requestData.clause_id,
+                term_sheet_text: requestData.term_sheet_text,
+                reference_article: data.reference_article
+            };
+
+            // 결과 표시
+            resultMeta.innerHTML = `
+                <div class="meta-item"><strong>참조 조:</strong> ${escapeHtml(data.reference_article)}</div>
+                <div class="meta-item"><strong>참조 항:</strong> ${data.reference_clauses.map(c => escapeHtml(c)).join(', ')}</div>
+            `;
+            resultPrompt.textContent = data.prompt;
+            resultSection.style.display = 'block';
+            updateSaveButtonVisibility();
+
+            // 결과 영역으로 스크롤
+            resultSection.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (error) {
+            alert('오류: ' + error.message);
+        } finally {
+            generateBtn.disabled = false;
+            generateBtn.textContent = '프롬프트 생성';
+            checkGenerateEnabled();
+        }
+    });
+
+    // 복사 버튼
+    copyBtn.addEventListener('click', function() {
+        const promptText = resultPrompt.textContent;
+        navigator.clipboard.writeText(promptText).then(() => {
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = '복사됨!';
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+            }, 2000);
+        }).catch(err => {
+            console.error('복사 실패:', err);
+            const range = document.createRange();
+            range.selectNode(resultPrompt);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            document.execCommand('copy');
+            window.getSelection().removeAllRanges();
+
+            const originalText = copyBtn.textContent;
+            copyBtn.textContent = '복사됨!';
+            setTimeout(() => {
+                copyBtn.textContent = originalText;
+            }, 2000);
+        });
+    });
+
+    // ChatGPT 호출하여 저장
+    chatgptBtn.addEventListener('click', async function() {
+        const generatedId = currentGeneratedId || parseInt(generatedSelect.value);
+
+        if (!generatedId) {
+            alert('저장할 생성 약정서를 선택하거나 새로 만들어주세요.');
+            return;
+        }
+
+        if (!currentReferenceData) {
+            alert('먼저 프롬프트를 생성해주세요.');
+            return;
+        }
+
+        // 버튼 비활성화 및 로딩 표시
+        chatgptBtn.disabled = true;
+        chatgptBtn.textContent = 'ChatGPT 호출 중...';
+        chatgptResultSection.style.display = 'none';
+
+        const requestData = {
+            generated_agreement_id: generatedId,
+            term_sheet_text: currentReferenceData.term_sheet_text,
+            agreement_id: currentReferenceData.agreement_id,
+            article_id: currentReferenceData.article_id,
+            clause_id: currentReferenceData.clause_id
+        };
+
+        try {
+            const response = await fetch('/api/generated/generate-with-chatgpt', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // 성공: 결과 표시
+                chatgptResult.textContent = data.ai_content;
+                saveSuccessMessage.innerHTML = `
+                    <strong>저장 완료!</strong><br>
+                    ${escapeHtml(data.message)}<br>
+                    <a href="/generated/${data.generated_agreement_id}/article/${data.generated_article_id}">저장된 조항 보기</a>
+                `;
+                chatgptResultSection.style.display = 'block';
+                chatgptResultSection.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                // 에러
+                alert('오류: ' + (data.detail || 'ChatGPT 호출에 실패했습니다.'));
+            }
+        } catch (error) {
+            alert('ChatGPT 호출 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            chatgptBtn.disabled = false;
+            chatgptBtn.textContent = 'ChatGPT 호출하여 저장';
+        }
+    });
+
+    // AI 결과 저장 모달 열기 (수동 저장)
+    saveResultBtn.addEventListener('click', function() {
+        if (!currentGeneratedId && !generatedSelect.value) {
+            alert('저장할 생성 약정서를 선택하거나 새로 만들어주세요.');
+            return;
+        }
+
+        // 조 번호/제목 자동 채우기 (참조 데이터에서)
+        if (currentReferenceData && currentReferenceData.reference_article) {
+            const match = currentReferenceData.reference_article.match(/제(\S+)조\s+(.+)/);
+            if (match) {
+                document.getElementById('articleNumberInput').value = match[1];
+                document.getElementById('articleTitleInput').value = match[2];
+            }
+        }
+
+        saveModal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    });
+
+    window.closeSaveModal = function() {
+        saveModal.classList.add('hidden');
+        document.body.style.overflow = '';
+    };
+
+    // AI 결과 저장 확인
+    confirmSaveBtn.addEventListener('click', async function() {
+        const generatedId = currentGeneratedId || parseInt(generatedSelect.value);
+        const aiContent = document.getElementById('aiResultInput').value.trim();
+        const articleNumber = document.getElementById('articleNumberInput').value.trim();
+        const articleTitle = document.getElementById('articleTitleInput').value.trim();
+
+        if (!aiContent) {
+            alert('AI 생성 결과를 입력해주세요.');
+            return;
+        }
+
+        const saveData = {
+            generated_agreement_id: generatedId,
+            article_number_display: articleNumber || null,
+            article_title: articleTitle || null,
+            ref_agreement_id: currentReferenceData?.agreement_id,
+            ref_article_id: currentReferenceData?.article_id,
+            ref_clause_id: currentReferenceData?.clause_id,
+            term_sheet_text: currentReferenceData?.term_sheet_text,
+            ai_content: aiContent
+        };
+
+        // article_number 숫자 추출
+        if (articleNumber) {
+            const numberMatch = articleNumber.match(/\d+/);
+            if (numberMatch) {
+                saveData.article_number = parseInt(numberMatch[0]);
+            }
+        }
+
+        try {
+            const response = await fetch('/api/generated/save-ai-result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(saveData)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                closeSaveModal();
+                alert(`저장되었습니다!\n\n생성 약정서: ${generatedId}\n조 ID: ${data.id}`);
+
+                // 입력 필드 초기화
+                document.getElementById('aiResultInput').value = '';
+            } else {
+                const error = await response.json();
+                alert(error.detail || '저장 실패');
+            }
+        } catch (error) {
+            alert('저장 중 오류가 발생했습니다.');
+        }
+    });
+
+    // ESC 키로 모달 닫기
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !saveModal.classList.contains('hidden')) {
+            closeSaveModal();
+        }
+    });
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 초기 로드
+    loadAgreements();
+    checkApiStatus();
+});
+</script>
+{% endblock %}

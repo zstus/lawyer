@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+
+{% block title %}조항추가 - 대출약정서 생성 시스템{% endblock %}
+
+{% block nav_work %}active{% endblock %}
+
+{% block content %}
+<div class="add-article-page">
+    <div class="page-title">조항추가</div>
+
+    <!-- 1단계: Term Sheet 정보 입력 -->
+    <section class="step-card">
+        <h2 class="step-title">1단계: Term Sheet 정보 입력</h2>
+        <p class="step-description">생성하려는 조항에 필요한 Term Sheet의 관련 정보를 붙여넣으세요.</p>
+        <textarea
+            id="termSheetText"
+            class="term-sheet-textarea"
+            placeholder="예시:
+- 대출금액: 금 오십억원 (￦5,000,000,000)
+- 대출기간: 2024년 10월 1일 ~ 2039년 9월 30일 (15년)
+- 이자율: CD금리 + 2.5% (연간)
+- 상환방식: 원리금균등분할상환
+..."
+            rows="8"
+        ></textarea>
+    </section>
+
+    <!-- 2단계: 참조 대출약정서 선택 -->
+    <section class="step-card">
+        <h2 class="step-title">2단계: 참조 대출약정서 선택</h2>
+        <p class="step-description">새 조항의 구조를 참조할 기존 대출약정서를 선택하세요.</p>
+        <div class="select-row">
+            <select id="agreementSelect" class="select-input">
+                <option value="">참조 대출약정서 선택</option>
+            </select>
+            <select id="articleSelect" class="select-input" disabled>
+                <option value="">조(Article) 선택</option>
+            </select>
+            <select id="clauseSelect" class="select-input" disabled>
+                <option value="">항(Clause) 선택</option>
+            </select>
+        </div>
+    </section>
+
+    <!-- 프롬프트 생성 버튼 -->
+    <div class="action-row">
+        <button id="generatePromptBtn" class="btn btn-primary" disabled>프롬프트 생성</button>
+    </div>
+
+    <!-- 3단계: 생성된 프롬프트 -->
+    <section class="step-card" id="step3Section" style="display: none;">
+        <div class="step-header">
+            <h2 class="step-title">3단계: 생성된 프롬프트</h2>
+            <button id="copyPromptBtn" class="btn-icon" title="프롬프트 복사">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
+        </div>
+        <p class="step-description">생성하려는 조항에 필요한 Term Sheet의 관련 정보를 붙여넣으세요.</p>
+        <pre class="prompt-display" id="promptDisplay"></pre>
+    </section>
+
+    <!-- 생성형AI 호출 버튼 -->
+    <div class="action-row" id="aiCallRow" style="display: none;">
+        <button id="callAIBtn" class="btn btn-primary">생성형AI 호출</button>
+    </div>
+
+    <!-- 4단계: 생성된 조항 -->
+    <section class="step-card" id="step4Section" style="display: none;">
+        <div class="step-header">
+            <h2 class="step-title">4단계: 생성형 AI를 통해 생성된 조항</h2>
+            <button id="copyResultBtn" class="btn-icon" title="결과 복사">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+            </button>
+        </div>
+        <p class="step-description">생성된 조항을 확인하고 작업중인 대출약정서에 추가하세요.</p>
+        <div class="ai-result-display" id="aiResultDisplay"></div>
+
+        <!-- 저장 정보 입력 -->
+        <div class="save-inputs">
+            <div class="input-group">
+                <label for="articleNumberInput">조번호</label>
+                <input type="text" id="articleNumberInput" placeholder="예: 1, 2, 1의2">
+            </div>
+            <div class="input-group">
+                <label for="articleTitleInput">조제목</label>
+                <input type="text" id="articleTitleInput" placeholder="">
+            </div>
+            <div class="input-group">
+                <label for="clauseTitleInput">항제목</label>
+                <input type="text" id="clauseTitleInput" placeholder="">
+            </div>
+        </div>
+    </section>
+
+    <!-- 생성된조항추가 버튼 -->
+    <div class="action-row" id="saveRow" style="display: none;">
+        <button id="saveArticleBtn" class="btn btn-primary">생성된조항추가</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const workAgreementId = {{ agreement_id }};
+
+    // Elements
+    const termSheetText = document.getElementById('termSheetText');
+    const agreementSelect = document.getElementById('agreementSelect');
+    const articleSelect = document.getElementById('articleSelect');
+    const clauseSelect = document.getElementById('clauseSelect');
+    const generatePromptBtn = document.getElementById('generatePromptBtn');
+    const step3Section = document.getElementById('step3Section');
+    const promptDisplay = document.getElementById('promptDisplay');
+    const copyPromptBtn = document.getElementById('copyPromptBtn');
+    const aiCallRow = document.getElementById('aiCallRow');
+    const callAIBtn = document.getElementById('callAIBtn');
+    const step4Section = document.getElementById('step4Section');
+    const aiResultDisplay = document.getElementById('aiResultDisplay');
+    const copyResultBtn = document.getElementById('copyResultBtn');
+    const articleNumberInput = document.getElementById('articleNumberInput');
+    const articleTitleInput = document.getElementById('articleTitleInput');
+    const clauseTitleInput = document.getElementById('clauseTitleInput');
+    const saveRow = document.getElementById('saveRow');
+    const saveArticleBtn = document.getElementById('saveArticleBtn');
+
+    let currentPrompt = '';
+    let currentAIResult = '';
+    let referenceData = null;
+
+    // 기준약정서 목록 로드
+    async function loadAgreements() {
+        try {
+            const response = await fetch('/api/agreements/');
+            const agreements = await response.json();
+            agreementSelect.innerHTML = '<option value="">참조 대출약정서 선택</option>';
+            agreements.forEach(a => {
+                agreementSelect.innerHTML += `<option value="${a.id}">${escapeHtml(a.name)}</option>`;
+            });
+        } catch (error) {
+            console.error('약정서 목록 로드 실패:', error);
+        }
+    }
+
+    // 조 목록 로드
+    async function loadArticles(agreementId) {
+        try {
+            const response = await fetch(`/api/agreements/${agreementId}/articles`);
+            const articles = await response.json();
+            articleSelect.innerHTML = '<option value="">조(Article) 선택</option>';
+            articles.forEach(a => {
+                articleSelect.innerHTML += `<option value="${a.id}" data-number="${a.article_number_display}" data-title="${escapeHtml(a.title)}">제${a.article_number_display}조 ${escapeHtml(a.title)}</option>`;
+            });
+            articleSelect.disabled = false;
+            clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
+            clauseSelect.disabled = true;
+        } catch (error) {
+            console.error('조 목록 로드 실패:', error);
+        }
+    }
+
+    // 항 목록 로드
+    async function loadClauses(agreementId, articleId) {
+        try {
+            const response = await fetch(`/api/agreements/${agreementId}/articles/${articleId}/clauses`);
+            const clauses = await response.json();
+            clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
+            clauses.forEach(c => {
+                clauseSelect.innerHTML += `<option value="${c.id}" data-number="${c.clause_number_display}" data-title="${escapeHtml(c.title)}">제${c.clause_number_display}항 ${escapeHtml(c.title)}</option>`;
+            });
+            clauseSelect.disabled = false;
+        } catch (error) {
+            console.error('항 목록 로드 실패:', error);
+        }
+    }
+
+    // 프롬프트 생성 버튼 활성화 체크
+    function checkGenerateEnabled() {
+        const hasTermSheet = termSheetText.value.trim().length > 0;
+        const hasAgreement = agreementSelect.value !== '';
+        const hasArticle = articleSelect.value !== '';
+        generatePromptBtn.disabled = !(hasTermSheet && hasAgreement && hasArticle);
+    }
+
+    // 이벤트 리스너
+    termSheetText.addEventListener('input', checkGenerateEnabled);
+
+    agreementSelect.addEventListener('change', function() {
+        if (this.value) {
+            loadArticles(this.value);
+        } else {
+            articleSelect.innerHTML = '<option value="">조(Article) 선택</option>';
+            articleSelect.disabled = true;
+            clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
+            clauseSelect.disabled = true;
+        }
+        checkGenerateEnabled();
+    });
+
+    articleSelect.addEventListener('change', function() {
+        if (this.value && agreementSelect.value) {
+            loadClauses(agreementSelect.value, this.value);
+        } else {
+            clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
+            clauseSelect.disabled = true;
+        }
+        checkGenerateEnabled();
+    });
+
+    // 프롬프트 생성
+    generatePromptBtn.addEventListener('click', async function() {
+        const selectedArticle = articleSelect.options[articleSelect.selectedIndex];
+        const selectedClause = clauseSelect.value ? clauseSelect.options[clauseSelect.selectedIndex] : null;
+
+        referenceData = {
+            agreement_id: parseInt(agreementSelect.value),
+            article_id: parseInt(articleSelect.value),
+            clause_id: clauseSelect.value ? parseInt(clauseSelect.value) : null,
+            term_sheet_text: termSheetText.value.trim(),
+            article_number: selectedArticle.dataset.number,
+            article_title: selectedArticle.dataset.title,
+            clause_number: selectedClause ? selectedClause.dataset.number : null,
+            clause_title: selectedClause ? selectedClause.dataset.title : null
+        };
+
+        generatePromptBtn.disabled = true;
+        generatePromptBtn.textContent = '생성 중...';
+
+        try {
+            const response = await fetch('/api/agreements/generate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    term_sheet_text: referenceData.term_sheet_text,
+                    agreement_id: referenceData.agreement_id,
+                    article_id: referenceData.article_id,
+                    clause_id: referenceData.clause_id
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('프롬프트 생성 실패');
+            }
+
+            const data = await response.json();
+            currentPrompt = data.prompt;
+            promptDisplay.textContent = currentPrompt;
+            step3Section.style.display = 'block';
+            aiCallRow.style.display = 'flex';
+            step3Section.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (error) {
+            alert('오류: ' + error.message);
+        } finally {
+            generatePromptBtn.disabled = false;
+            generatePromptBtn.textContent = '프롬프트 생성';
+            checkGenerateEnabled();
+        }
+    });
+
+    // 프롬프트 복사
+    copyPromptBtn.addEventListener('click', function() {
+        navigator.clipboard.writeText(currentPrompt).then(() => {
+            showCopyFeedback(copyPromptBtn);
+        });
+    });
+
+    // 생성형AI 호출
+    callAIBtn.addEventListener('click', async function() {
+        callAIBtn.disabled = true;
+        callAIBtn.textContent = 'AI 호출 중...';
+
+        try {
+            const response = await fetch('/api/generated/generate-with-chatgpt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    generated_agreement_id: workAgreementId,
+                    term_sheet_text: referenceData.term_sheet_text,
+                    agreement_id: referenceData.agreement_id,
+                    article_id: referenceData.article_id,
+                    clause_id: referenceData.clause_id,
+                    skip_save: true  // 바로 저장하지 않고 결과만 받기
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || 'AI 호출 실패');
+            }
+
+            currentAIResult = data.ai_content;
+            aiResultDisplay.innerHTML = formatAIResult(currentAIResult);
+
+            // 기본값 설정 (참조한 조/항 정보)
+            articleNumberInput.value = referenceData.article_number || '';
+            articleTitleInput.value = referenceData.article_title || '';
+            clauseTitleInput.value = referenceData.clause_title || referenceData.article_title || '';
+
+            step4Section.style.display = 'block';
+            saveRow.style.display = 'flex';
+            step4Section.scrollIntoView({ behavior: 'smooth' });
+
+        } catch (error) {
+            alert('오류: ' + error.message);
+        } finally {
+            callAIBtn.disabled = false;
+            callAIBtn.textContent = '생성형AI 호출';
+        }
+    });
+
+    // 결과 복사
+    copyResultBtn.addEventListener('click', function() {
+        navigator.clipboard.writeText(currentAIResult).then(() => {
+            showCopyFeedback(copyResultBtn);
+        });
+    });
+
+    // 생성된 조항 추가
+    saveArticleBtn.addEventListener('click', async function() {
+        const articleNumber = articleNumberInput.value.trim();
+        const articleTitle = articleTitleInput.value.trim();
+        const clauseTitle = clauseTitleInput.value.trim();
+
+        if (!articleNumber) {
+            alert('조번호를 입력해주세요.');
+            return;
+        }
+
+        saveArticleBtn.disabled = true;
+        saveArticleBtn.textContent = '저장 중...';
+
+        // article_number 숫자 추출
+        let articleNumberInt = null;
+        const numberMatch = articleNumber.match(/\d+/);
+        if (numberMatch) {
+            articleNumberInt = parseInt(numberMatch[0]);
+        }
+
+        try {
+            const response = await fetch('/api/generated/save-ai-result', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    generated_agreement_id: workAgreementId,
+                    article_number: articleNumberInt,
+                    article_number_display: articleNumber,
+                    article_title: articleTitle,
+                    clause_title: clauseTitle,
+                    ref_agreement_id: referenceData.agreement_id,
+                    ref_article_id: referenceData.article_id,
+                    ref_clause_id: referenceData.clause_id,
+                    term_sheet_text: referenceData.term_sheet_text,
+                    ai_content: currentAIResult
+                })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '저장 실패');
+            }
+
+            alert('조항이 추가되었습니다.');
+            window.location.href = `/work/${workAgreementId}`;
+
+        } catch (error) {
+            alert('오류: ' + error.message);
+        } finally {
+            saveArticleBtn.disabled = false;
+            saveArticleBtn.textContent = '생성된조항추가';
+        }
+    });
+
+    function formatAIResult(text) {
+        // 줄바꿈을 <br>로 변환
+        return text.split('\n').map(line => `<p>${escapeHtml(line) || '&nbsp;'}</p>`).join('');
+    }
+
+    function showCopyFeedback(btn) {
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => {
+            btn.innerHTML = originalHTML;
+        }, 1500);
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 초기 로드
+    loadAgreements();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}생성 약정서 상세 - 대출약정서 관리 시스템{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+    <a href="/">홈</a> &gt; <a href="/generated">생성 약정서</a> &gt; <span id="agreementName">약정서</span>
+</div>
+
+<div class="page-header" id="headerSection">
+    <h1 id="agreementTitle">로딩 중...</h1>
+    <p class="subtitle" id="agreementMeta"></p>
+</div>
+
+<!-- 편집 모드 -->
+<section class="edit-section card" id="editSection" style="display: none;">
+    <h2>약정서 정보 수정</h2>
+    <form id="editForm">
+        <div class="form-group">
+            <label for="editName">약정서 이름</label>
+            <input type="text" id="editName" name="name" required>
+        </div>
+        <div class="form-group">
+            <label for="editDescription">설명</label>
+            <textarea id="editDescription" name="description" rows="2"></textarea>
+        </div>
+        <div class="btn-group">
+            <button type="submit" class="btn btn-primary">저장</button>
+            <button type="button" class="btn btn-secondary" onclick="toggleEditMode()">취소</button>
+        </div>
+    </form>
+</section>
+
+<!-- 조 목록 섹션 -->
+<section class="articles-section">
+    <div class="section-header">
+        <h2>생성된 조(Article) 목록</h2>
+        <div class="btn-group">
+            <button class="btn btn-secondary" onclick="toggleEditMode()">정보 수정</button>
+            <a href="/generate" class="btn btn-primary">조항 추가</a>
+        </div>
+    </div>
+    <p class="section-description">조를 클릭하면 상세 내용을 볼 수 있습니다.</p>
+
+    <div id="articlesList" class="articles-list">
+        <div class="loading">로딩 중...</div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const agreementId = {{ agreement_id }};
+    const articlesList = document.getElementById('articlesList');
+    const editSection = document.getElementById('editSection');
+    const editForm = document.getElementById('editForm');
+    let currentAgreement = null;
+
+    async function loadAgreement() {
+        try {
+            const response = await fetch(`/api/generated/${agreementId}`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    articlesList.innerHTML = '<p class="error-message">약정서를 찾을 수 없습니다.</p>';
+                    return;
+                }
+                throw new Error('Failed to load');
+            }
+
+            currentAgreement = await response.json();
+
+            // 헤더 업데이트
+            document.getElementById('agreementName').textContent = currentAgreement.name;
+            document.getElementById('agreementTitle').textContent = currentAgreement.name;
+            document.getElementById('agreementMeta').innerHTML = `
+                생성 조항 ${currentAgreement.article_count}개 |
+                생성일 ${formatDate(currentAgreement.created_at)} |
+                최종 수정 ${formatDate(currentAgreement.updated_at)}
+            `;
+            document.title = `${currentAgreement.name} - 대출약정서 관리 시스템`;
+
+            // 수정 폼 데이터 설정
+            document.getElementById('editName').value = currentAgreement.name;
+            document.getElementById('editDescription').value = currentAgreement.description || '';
+
+            // 조 목록 표시
+            if (currentAgreement.articles.length === 0) {
+                articlesList.innerHTML = `
+                    <div class="empty-message">
+                        <p>생성된 조항이 없습니다.</p>
+                        <a href="/generate" class="btn btn-primary">프롬프트 생성 페이지에서 조항 추가</a>
+                    </div>
+                `;
+                return;
+            }
+
+            articlesList.innerHTML = currentAgreement.articles.map(article => `
+                <div class="article-card card">
+                    <div class="article-number">
+                        ${article.article_number_display ? `제 ${article.article_number_display} 조` : '(번호 미지정)'}
+                    </div>
+                    <div class="article-info" onclick="location.href='/generated/${agreementId}/article/${article.id}'">
+                        <h3>${escapeHtml(article.title || '(제목 없음)')}</h3>
+                        <p class="meta">
+                            <span>항 ${article.clause_count}개</span>
+                            <span>생성일 ${formatDate(article.created_at)}</span>
+                            ${article.ref_article_id ? '<span class="badge">참조 있음</span>' : ''}
+                        </p>
+                    </div>
+                    <div class="article-actions">
+                        <button class="btn btn-small btn-danger" onclick="deleteArticle(${article.id}, event)">삭제</button>
+                    </div>
+                </div>
+            `).join('');
+
+        } catch (error) {
+            articlesList.innerHTML = '<p class="error-message">데이터를 불러올 수 없습니다.</p>';
+        }
+    }
+
+    // 수정 모드 토글
+    window.toggleEditMode = function() {
+        editSection.style.display = editSection.style.display === 'none' ? 'block' : 'none';
+    };
+
+    // 수정 폼 제출
+    editForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = {
+            name: document.getElementById('editName').value,
+            description: document.getElementById('editDescription').value || null
+        };
+
+        try {
+            const response = await fetch(`/api/generated/${agreementId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+
+            if (response.ok) {
+                editSection.style.display = 'none';
+                loadAgreement();
+            } else {
+                const data = await response.json();
+                alert(data.detail || '수정 실패');
+            }
+        } catch (error) {
+            alert('수정 중 오류가 발생했습니다.');
+        }
+    });
+
+    // 조 삭제
+    window.deleteArticle = async function(articleId, event) {
+        event.stopPropagation();
+        if (!confirm('이 조를 삭제하시겠습니까?\n포함된 모든 항도 함께 삭제됩니다.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/generated/${agreementId}/articles/${articleId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                loadAgreement();
+            } else {
+                alert('삭제에 실패했습니다.');
+            }
+        } catch (error) {
+            alert('삭제 중 오류가 발생했습니다.');
+        }
+    };
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('ko-KR');
+    }
+
+    loadAgreement();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}기준약정서 - 대출약정서 생성 시스템{% endblock %}
+
+{% block nav_reference %}active{% endblock %}
+
+{% block content %}
+<div class="list-page">
+    <!-- 업로드 버튼 -->
+    <div class="action-bar">
+        <button id="uploadBtn" class="btn btn-primary btn-upload">기준 대출약정서 업로드</button>
+    </div>
+
+    <!-- 약정서 목록 -->
+    <div id="agreementsList" class="agreement-list">
+        <div class="loading">로딩 중...</div>
+    </div>
+</div>
+
+<!-- 업로드 모달 -->
+<div id="uploadModal" class="modal hidden">
+    <div class="modal-overlay" onclick="closeUploadModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>기준 대출약정서 업로드</h3>
+            <button class="modal-close" onclick="closeUploadModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="fileInput" name="file" accept=".docx" hidden>
+                    <div class="upload-placeholder">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p>DOCX 파일을 드래그하거나 클릭하여 선택</p>
+                        <p class="file-name" id="fileName"></p>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeUploadModal()">취소</button>
+                    <button type="submit" class="btn btn-primary" id="submitUploadBtn" disabled>업로드</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadBtn = document.getElementById('uploadBtn');
+    const uploadModal = document.getElementById('uploadModal');
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const submitUploadBtn = document.getElementById('submitUploadBtn');
+    const uploadForm = document.getElementById('uploadForm');
+    const agreementsList = document.getElementById('agreementsList');
+
+    // 모달 열기
+    uploadBtn.addEventListener('click', () => {
+        uploadModal.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    });
+
+    // 모달 닫기
+    window.closeUploadModal = function() {
+        uploadModal.classList.add('hidden');
+        document.body.style.overflow = '';
+        fileInput.value = '';
+        fileName.textContent = '';
+        submitUploadBtn.disabled = true;
+    };
+
+    // 파일 선택 영역 클릭
+    uploadArea.addEventListener('click', () => fileInput.click());
+
+    // 드래그 앤 드롭
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+    });
+
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+    });
+
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            handleFileSelect(files[0]);
+        }
+    });
+
+    // 파일 선택 변경
+    fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            handleFileSelect(e.target.files[0]);
+        }
+    });
+
+    function handleFileSelect(file) {
+        if (!file.name.endsWith('.docx')) {
+            alert('DOCX 파일만 업로드 가능합니다.');
+            return;
+        }
+        fileName.textContent = file.name;
+        submitUploadBtn.disabled = false;
+
+        // DataTransfer를 사용하여 파일 설정
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        fileInput.files = dataTransfer.files;
+    }
+
+    // 폼 제출
+    uploadForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        submitUploadBtn.disabled = true;
+        submitUploadBtn.textContent = '업로드 중...';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/agreements/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                closeUploadModal();
+                loadAgreements();
+            } else {
+                alert(data.detail || '업로드 실패');
+            }
+        } catch (error) {
+            alert('업로드 중 오류가 발생했습니다.');
+        } finally {
+            submitUploadBtn.disabled = false;
+            submitUploadBtn.textContent = '업로드';
+        }
+    });
+
+    // 약정서 목록 로드
+    async function loadAgreements() {
+        try {
+            const response = await fetch('/api/agreements/');
+            const agreements = await response.json();
+
+            if (agreements.length === 0) {
+                agreementsList.innerHTML = '<p class="empty-message">등록된 기준약정서가 없습니다.</p>';
+                return;
+            }
+
+            agreementsList.innerHTML = agreements.map(a => `
+                <div class="agreement-item" onclick="location.href='/reference/${a.id}'">
+                    <div class="agreement-info">
+                        <h3 class="agreement-title">${escapeHtml(a.name)}</h3>
+                        <p class="agreement-meta">${escapeHtml(a.file_name)}</p>
+                    </div>
+                    <div class="agreement-right">
+                        <span class="agreement-date">생성일 ${formatDate(a.created_at)}</span>
+                        <button class="btn-icon btn-delete" onclick="deleteAgreement(event, ${a.id}, '${escapeHtml(a.name)}')" title="삭제">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            agreementsList.innerHTML = '<p class="error-message">목록을 불러올 수 없습니다.</p>';
+        }
+    }
+
+    // 약정서 삭제
+    window.deleteAgreement = async function(event, id, name) {
+        event.stopPropagation();
+        if (!confirm(`"${name}" 약정서를 삭제하시겠습니까?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/agreements/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                loadAgreements();
+            } else {
+                alert('삭제에 실패했습니다.');
+            }
+        } catch (error) {
+            alert('삭제 중 오류가 발생했습니다.');
+        }
+    };
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    }
+
+    // ESC 키로 모달 닫기
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !uploadModal.classList.contains('hidden')) {
+            closeUploadModal();
+        }
+    });
+
+    // 초기 로드
+    loadAgreements();
+});
+</script>
+{% endblock %}
