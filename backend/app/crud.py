@@ -265,7 +265,8 @@ def create_generated_article(
             title=clause_data.title,
             content=clause_data.content,
             order_index=clause_data.order_index,
-            ref_clause_id=clause_data.ref_clause_id
+            ref_clause_id=clause_data.ref_clause_id,
+            score=clause_data.score
         )
         db.add(db_clause)
 
@@ -307,7 +308,7 @@ def get_generated_clauses(db: Session, article_id: int) -> List[models.Generated
     """생성 조의 모든 항 조회"""
     return db.query(models.GeneratedClause)\
              .filter(models.GeneratedClause.article_id == article_id)\
-             .order_by(models.GeneratedClause.order_index)\
+             .order_by(models.GeneratedClause.clause_number)\
              .all()
 
 
@@ -334,7 +335,8 @@ def create_generated_clause(
         title=data.title,
         content=data.content,
         order_index=data.order_index if data.order_index > 0 else max_order + 1,
-        ref_clause_id=data.ref_clause_id
+        ref_clause_id=data.ref_clause_id,
+        score=data.score
     )
     db.add(db_clause)
     db.commit()

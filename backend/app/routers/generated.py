@@ -1,12 +1,15 @@
 """생성 대출약정서 API 라우터"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
+from datetime import datetime, timezone
 
 from ..database import get_db
 from .. import crud, schemas, models
 from ..services import openai_service
+from ..services.prompt_service import build_generation_prompt
+from ..parser import parse_ai_generated_clauses, extract_plain_text_from_ai_response
 
 router = APIRouter(prefix="/api/generated", tags=["generated"])
 
@@ -216,6 +219,7 @@ def get_generated_article(agreement_id: int, article_id: int, db: Session = Depe
                 content=c.content,
                 order_index=c.order_index,
                 ref_clause_id=c.ref_clause_id,
+                score=c.score,
                 created_at=c.created_at,
                 updated_at=c.updated_at
             )
@@ -287,6 +291,7 @@ def list_generated_clauses(agreement_id: int, article_id: int, db: Session = Dep
             content=c.content,
             order_index=c.order_index,
             ref_clause_id=c.ref_clause_id,
+            score=c.score,
             created_at=c.created_at,
             updated_at=c.updated_at
         )
@@ -317,6 +322,7 @@ def create_generated_clause(
         content=clause.content,
         order_index=clause.order_index,
         ref_clause_id=clause.ref_clause_id,
+        score=clause.score,
         created_at=clause.created_at,
         updated_at=clause.updated_at
     )
@@ -351,6 +357,7 @@ def update_generated_clause(
         content=clause.content,
         order_index=clause.order_index,
         ref_clause_id=clause.ref_clause_id,
+        score=clause.score,
         created_at=clause.created_at,
         updated_at=clause.updated_at
     )
@@ -392,27 +399,110 @@ def save_ai_result(
     if not agreement:
         raise HTTPException(status_code=404, detail="생성 대출약정서를 찾을 수 없습니다.")
 
-    # 조 생성 데이터 구성
-    article_data = schemas.GeneratedArticleCreate(
-        article_number=data.article_number,
-        article_number_display=data.article_number_display,
-        title=data.article_title,
-        ref_agreement_id=data.ref_agreement_id,
-        ref_article_id=data.ref_article_id,
-        term_sheet_text=data.term_sheet_text,
-        clauses=[
+    # 다중 항 모드: AI 응답을 파싱하여 여러 항 생성
+    if data.multi_clause_mode:
+        parsed_clauses = parse_ai_generated_clauses(data.ai_content)
+        clauses_data = [
             schemas.GeneratedClauseCreate(
-                clause_number=1,
-                clause_number_display="1",
+                clause_number=clause['clause_number'],
+                clause_number_display=clause['clause_number_display'],
+                title=clause['title'] or f"제{clause['clause_number']}항",
+                content=clause['content'],
+                order_index=idx + 1,
+                ref_clause_id=None,
+                score=data.score  # 담당자 평가 점수
+            )
+            for idx, clause in enumerate(parsed_clauses)
+        ]
+    else:
+        # 단일 항 생성 — 2단계에서 선택한 항 번호 사용 (없으면 1)
+        clause_num = data.clause_number if data.clause_number else 1
+        clause_num_display = data.clause_number_display if data.clause_number_display else str(clause_num)
+        # JSON 형식 응답에서 순수 텍스트 추출 (공통 함수)
+        plain_text = extract_plain_text_from_ai_response(data.ai_content)
+        clauses_data = [
+            schemas.GeneratedClauseCreate(
+                clause_number=clause_num,
+                clause_number_display=clause_num_display,
                 title=data.clause_title or "AI 생성 내용",
-                content=data.ai_content,
+                content=plain_text,
                 order_index=1,
-                ref_clause_id=data.ref_clause_id
+                ref_clause_id=data.ref_clause_id,
+                score=data.score  # 담당자 평가 점수
             )
         ]
-    )
 
-    article = crud.create_generated_article(db, data.generated_agreement_id, article_data)
+    # 기존 조에 항 추가 vs 새 조 생성 분기
+    if data.target_article_id:
+        # ── 기존 조에 항 추가 ──
+        target_article = crud.get_generated_article(db, data.target_article_id)
+        if not target_article or target_article.agreement_id != data.generated_agreement_id:
+            raise HTTPException(status_code=404, detail="대상 조를 찾을 수 없습니다.")
+
+        existing_clauses = crud.get_generated_clauses(db, data.target_article_id)
+
+        if data.multi_clause_mode:
+            # 기존 항 전체 삭제 후 새 항들 추가
+            for c in existing_clauses:
+                db.delete(c)
+            db.flush()
+            for cd in clauses_data:
+                db.add(models.GeneratedClause(
+                    article_id=data.target_article_id,
+                    clause_number=cd.clause_number,
+                    clause_number_display=cd.clause_number_display,
+                    title=cd.title,
+                    content=cd.content,
+                    order_index=cd.order_index,
+                    ref_clause_id=cd.ref_clause_id,
+                    score=cd.score
+                ))
+        else:
+            # 동일 항 번호가 있으면 삭제 후 새 항 추가
+            cd = clauses_data[0]
+            for c in existing_clauses:
+                if c.clause_number_display == cd.clause_number_display:
+                    db.delete(c)
+            db.flush()
+            max_order = db.query(func.max(models.GeneratedClause.order_index))\
+                          .filter(models.GeneratedClause.article_id == data.target_article_id)\
+                          .scalar() or 0
+            db.add(models.GeneratedClause(
+                article_id=data.target_article_id,
+                clause_number=cd.clause_number,
+                clause_number_display=cd.clause_number_display,
+                title=cd.title,
+                content=cd.content,
+                order_index=max_order + 1,
+                ref_clause_id=cd.ref_clause_id,
+                score=cd.score
+            ))
+
+        db.commit()
+        db.refresh(target_article)
+        article = target_article
+
+    else:
+        # ── 새 조 생성 ──
+        article_data = schemas.GeneratedArticleCreate(
+            article_number=data.article_number,
+            article_number_display=data.article_number_display,
+            title=data.article_title,
+            ref_agreement_id=data.ref_agreement_id,
+            ref_article_id=data.ref_article_id,
+            term_sheet_text=data.term_sheet_text,
+            clauses=clauses_data
+        )
+        article = crud.create_generated_article(db, data.generated_agreement_id, article_data)
+
+    # 로그 점수 업데이트 (log_id와 score가 모두 있을 때)
+    if data.log_id and data.score and 1 <= data.score <= 5:
+        log = db.query(models.AIGenerationLog).filter(
+            models.AIGenerationLog.id == data.log_id
+        ).first()
+        if log:
+            log.score = data.score
+            db.commit()
 
     return schemas.GeneratedArticleResponse(
         id=article.id,
@@ -443,10 +533,14 @@ def check_api_status():
 
 @router.post("/generate-with-chatgpt", response_model=schemas.ChatGPTGenerateResponse)
 async def generate_with_chatgpt(
+    http_request: Request,
     request: schemas.ChatGPTGenerateRequest,
     db: Session = Depends(get_db)
 ):
     """ChatGPT를 호출하여 조항 생성 후 저장"""
+
+    # 세션에서 작성자 확인
+    username = http_request.session.get("username", "unknown")
 
     # 1. API 키 확인
     if not openai_service.check_api_key_configured():
@@ -469,39 +563,42 @@ async def generate_with_chatgpt(
     if not article or article.agreement_id != request.agreement_id:
         raise HTTPException(status_code=404, detail="참조 조를 찾을 수 없습니다.")
 
-    # 4. 항 목록 조회
+    # 4. 항 정보 조회 (로그용)
+    ref_clause_title = None
     clauses = crud.get_clauses(db, request.article_id)
     if request.clause_id:
         clauses = [c for c in clauses if c.id == request.clause_id]
         if not clauses:
             raise HTTPException(status_code=404, detail="참조 항을 찾을 수 없습니다.")
+        ref_clause_title = clauses[0].title if clauses else None
 
-    # 5. 프롬프트 생성
+    # 5. 프롬프트 결정 (사용자 수정본 우선, 없으면 자동 생성)
     reference_article = f"제{article.article_number_display}조 {article.title}"
-    clause_structure = []
 
-    for clause in clauses:
-        content_text = ""
-        if clause.content:
-            if isinstance(clause.content, dict):
-                content_text = clause.content.get("text", "")
-            else:
-                content_text = str(clause.content)
-
-        clause_structure.append({
-            "number": clause.clause_number_display,
-            "title": clause.title,
-            "content": content_text
-        })
-
-    prompt = _build_chatgpt_prompt(
-        term_sheet_text=request.term_sheet_text,
-        agreement_name=agreement.name,
-        article_info=reference_article,
-        clause_structure=clause_structure
-    )
+    if request.custom_prompt:
+        prompt = request.custom_prompt
+    else:
+        clause_structure = []
+        for clause in clauses:
+            content_text = ""
+            if clause.content:
+                if isinstance(clause.content, dict):
+                    content_text = clause.content.get("text", "")
+                else:
+                    content_text = str(clause.content)
+            clause_structure.append({
+                "number": clause.clause_number_display,
+                "title": clause.title,
+                "content": content_text
+            })
+        prompt = build_generation_prompt(
+            term_sheet_text=request.term_sheet_text,
+            agreement_name=agreement.name,
+            clause_structure=clause_structure
+        )
 
     # 6. ChatGPT 호출
+    called_at = datetime.now(timezone.utc)
     try:
         ai_content = await openai_service.generate_article_content(prompt)
     except Exception as e:
@@ -510,7 +607,27 @@ async def generate_with_chatgpt(
             detail=f"ChatGPT API 호출 중 오류가 발생했습니다: {str(e)}"
         )
 
-    # 7. skip_save 옵션이 있으면 저장하지 않고 결과만 반환
+    # 7. AI 호출 로그 저장
+    log = models.AIGenerationLog(
+        username=username,
+        generated_agreement_id=request.generated_agreement_id,
+        ref_agreement_id=request.agreement_id,
+        ref_article_id=request.article_id,
+        ref_clause_id=request.clause_id,
+        ref_agreement_name=agreement.name,
+        ref_article_title=article.title,
+        ref_clause_title=ref_clause_title,
+        called_at=called_at,
+        used_prompt=prompt,
+        ai_response=ai_content,
+        score=None
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    log_id = log.id
+
+    # 8. skip_save 옵션이 있으면 저장하지 않고 결과만 반환
     if request.skip_save:
         return schemas.ChatGPTGenerateResponse(
             success=True,
@@ -518,10 +635,12 @@ async def generate_with_chatgpt(
             generated_agreement_id=request.generated_agreement_id,
             reference_article=reference_article,
             ai_content=ai_content,
-            message=f"'{reference_article}' 조항이 생성되었습니다. (저장되지 않음)"
+            message=f"'{reference_article}' 조항이 생성되었습니다. (저장되지 않음)",
+            log_id=log_id
         )
 
-    # 8. 결과 저장
+    # 9. 결과 저장 (JSON → 순수 텍스트 변환 후 저장)
+    plain_text = extract_plain_text_from_ai_response(ai_content)
     article_data = schemas.GeneratedArticleCreate(
         article_number=article.article_number,
         article_number_display=article.article_number_display,
@@ -534,7 +653,7 @@ async def generate_with_chatgpt(
                 clause_number=1,
                 clause_number_display="1",
                 title="AI 생성 내용",
-                content=ai_content,
+                content=plain_text,
                 order_index=1,
                 ref_clause_id=request.clause_id
             )
@@ -549,57 +668,27 @@ async def generate_with_chatgpt(
         generated_agreement_id=request.generated_agreement_id,
         reference_article=reference_article,
         ai_content=ai_content,
-        message=f"'{reference_article}' 조항이 생성되어 저장되었습니다."
+        message=f"'{reference_article}' 조항이 생성되어 저장되었습니다.",
+        log_id=log_id
     )
 
 
-def _build_chatgpt_prompt(
-    term_sheet_text: str,
-    agreement_name: str,
-    article_info: str,
-    clause_structure: list
-) -> str:
-    """대출약정서 조항 생성을 위한 프롬프트 구성"""
+@router.put("/logs/{log_id}/score")
+def update_log_score(
+    log_id: int,
+    data: schemas.AILogScoreUpdate,
+    db: Session = Depends(get_db)
+):
+    """AI 호출 로그에 점수 업데이트"""
+    if not (1 <= data.score <= 5):
+        raise HTTPException(status_code=400, detail="점수는 1~5 사이여야 합니다.")
 
-    clause_examples = []
-    for clause in clause_structure:
-        example = f"""### 제{clause['number']}항 {clause['title']}
-{clause['content']}"""
-        clause_examples.append(example)
+    log = db.query(models.AIGenerationLog).filter(models.AIGenerationLog.id == log_id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="로그를 찾을 수 없습니다.")
 
-    clause_structure_text = "\n\n".join(clause_examples)
+    log.score = data.score
+    db.commit()
+    return {"message": "점수가 저장되었습니다.", "log_id": log_id, "score": data.score}
 
-    prompt = f"""당신은 대출약정서 작성 전문가입니다. 아래 Term Sheet 정보를 바탕으로 대출약정서의 조항을 작성해주세요.
 
-## 작성 지침
-
-1. **참조 문서**: "{agreement_name}"
-2. **참조 조항**: {article_info}
-3. 참조 조항의 **구조와 형식**을 그대로 따라 작성하되, Term Sheet의 정보를 반영하세요.
-4. 법률 문서 특유의 정확하고 명확한 문체를 유지하세요.
-5. 조항 번호, 항 번호 체계를 유지하세요.
-
----
-
-## Term Sheet 정보
-
-{term_sheet_text}
-
----
-
-## 참조 조항 구조 (이 구조를 따라 작성)
-
-{clause_structure_text}
-
----
-
-## 작성 요청
-
-위의 Term Sheet 정보를 반영하여, 참조 조항과 동일한 구조로 새로운 "{article_info}" 조항을 작성해주세요.
-
-- 각 항의 제목과 구조는 참조 조항을 따르세요.
-- 구체적인 수치, 날짜, 조건 등은 Term Sheet 정보를 사용하세요.
-- Term Sheet에 없는 정보는 "[확인 필요]"로 표시하세요.
-"""
-
-    return prompt

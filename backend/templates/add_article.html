@@ -47,7 +47,7 @@
         <button id="generatePromptBtn" class="btn btn-primary" disabled>프롬프트 생성</button>
     </div>
 
-    <!-- 3단계: 생성된 프롬프트 -->
+    <!-- 3단계: 생성된 프롬프트 (직접 수정 가능) -->
     <section class="step-card" id="step3Section" style="display: none;">
         <div class="step-header">
             <h2 class="step-title">3단계: 생성된 프롬프트</h2>
@@ -58,8 +58,9 @@
                 </svg>
             </button>
         </div>
-        <p class="step-description">생성하려는 조항에 필요한 Term Sheet의 관련 정보를 붙여넣으세요.</p>
-        <pre class="prompt-display" id="promptDisplay"></pre>
+        <p class="step-description">프롬프트를 직접 수정한 후 생성형AI를 호출하세요. 수정된 내용이 그대로 AI에 전달됩니다.</p>
+        <textarea id="promptDisplay" class="prompt-edit-textarea" spellcheck="false"></textarea>
+        <p class="prompt-edit-hint">※ 위 내용을 직접 편집할 수 있습니다.</p>
     </section>
 
     <!-- 생성형AI 호출 버튼 -->
@@ -98,9 +99,22 @@
         </div>
     </section>
 
-    <!-- 생성된조항추가 버튼 -->
-    <div class="action-row" id="saveRow" style="display: none;">
-        <button id="saveArticleBtn" class="btn btn-primary">생성된조항추가</button>
+    <!-- 평가 점수 카드 + 생성된조항추가 버튼 -->
+    <div id="saveRow" style="display: none;">
+        <div class="score-card">
+            <p class="score-card-title">AI 생성 결과 평가</p>
+            <div class="score-buttons">
+                <button class="score-btn" data-score="1">1점</button>
+                <button class="score-btn" data-score="2">2점</button>
+                <button class="score-btn" data-score="3">3점</button>
+                <button class="score-btn" data-score="4">4점</button>
+                <button class="score-btn" data-score="5">5점</button>
+            </div>
+            <p class="score-guide-text">평가점수를 선택하시면 조항추가 버튼이 활성화 됩니다.</p>
+        </div>
+        <div class="save-btn-row">
+            <button id="saveArticleBtn" class="btn btn-primary" disabled>생성된조항추가</button>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -111,28 +125,37 @@ document.addEventListener('DOMContentLoaded', function() {
     const workAgreementId = {{ agreement_id }};
 
     // Elements
-    const termSheetText = document.getElementById('termSheetText');
-    const agreementSelect = document.getElementById('agreementSelect');
-    const articleSelect = document.getElementById('articleSelect');
-    const clauseSelect = document.getElementById('clauseSelect');
-    const generatePromptBtn = document.getElementById('generatePromptBtn');
-    const step3Section = document.getElementById('step3Section');
-    const promptDisplay = document.getElementById('promptDisplay');
-    const copyPromptBtn = document.getElementById('copyPromptBtn');
-    const aiCallRow = document.getElementById('aiCallRow');
-    const callAIBtn = document.getElementById('callAIBtn');
-    const step4Section = document.getElementById('step4Section');
-    const aiResultDisplay = document.getElementById('aiResultDisplay');
-    const copyResultBtn = document.getElementById('copyResultBtn');
+    const termSheetText      = document.getElementById('termSheetText');
+    const agreementSelect    = document.getElementById('agreementSelect');
+    const articleSelect      = document.getElementById('articleSelect');
+    const clauseSelect       = document.getElementById('clauseSelect');
+    const generatePromptBtn  = document.getElementById('generatePromptBtn');
+    const step3Section       = document.getElementById('step3Section');
+    const promptDisplay      = document.getElementById('promptDisplay');
+    const copyPromptBtn      = document.getElementById('copyPromptBtn');
+    const aiCallRow          = document.getElementById('aiCallRow');
+    const callAIBtn          = document.getElementById('callAIBtn');
+    const step4Section       = document.getElementById('step4Section');
+    const aiResultDisplay    = document.getElementById('aiResultDisplay');
+    const copyResultBtn      = document.getElementById('copyResultBtn');
     const articleNumberInput = document.getElementById('articleNumberInput');
-    const articleTitleInput = document.getElementById('articleTitleInput');
-    const clauseTitleInput = document.getElementById('clauseTitleInput');
-    const saveRow = document.getElementById('saveRow');
-    const saveArticleBtn = document.getElementById('saveArticleBtn');
+    const articleTitleInput  = document.getElementById('articleTitleInput');
+    const clauseTitleInput   = document.getElementById('clauseTitleInput');
+    const saveRow            = document.getElementById('saveRow');
+    const saveArticleBtn     = document.getElementById('saveArticleBtn');
+    const scoreBtns          = document.querySelectorAll('.score-btn');
 
-    let currentPrompt = '';
-    let currentAIResult = '';
-    let referenceData = null;
+    let currentAIResult  = '';
+    let referenceData    = null;
+    let isMultiClauseMode = false;
+    let currentLogId     = null;
+    let selectedScore    = null;
+
+    // textarea 내용에 맞게 높이 자동 조정
+    function autoResize(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.max(420, el.scrollHeight) + 'px';
+    }
 
     // 기준약정서 목록 로드
     async function loadAgreements() {
@@ -182,13 +205,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 프롬프트 생성 버튼 활성화 체크
     function checkGenerateEnabled() {
-        const hasTermSheet = termSheetText.value.trim().length > 0;
-        const hasAgreement = agreementSelect.value !== '';
-        const hasArticle = articleSelect.value !== '';
+        const hasTermSheet  = termSheetText.value.trim().length > 0;
+        const hasAgreement  = agreementSelect.value !== '';
+        const hasArticle    = articleSelect.value !== '';
         generatePromptBtn.disabled = !(hasTermSheet && hasAgreement && hasArticle);
     }
 
-    // 이벤트 리스너
     termSheetText.addEventListener('input', checkGenerateEnabled);
 
     agreementSelect.addEventListener('change', function() {
@@ -197,8 +219,8 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             articleSelect.innerHTML = '<option value="">조(Article) 선택</option>';
             articleSelect.disabled = true;
-            clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
-            clauseSelect.disabled = true;
+            clauseSelect.innerHTML  = '<option value="">항(Clause) 선택</option>';
+            clauseSelect.disabled   = true;
         }
         checkGenerateEnabled();
     });
@@ -208,25 +230,32 @@ document.addEventListener('DOMContentLoaded', function() {
             loadClauses(agreementSelect.value, this.value);
         } else {
             clauseSelect.innerHTML = '<option value="">항(Clause) 선택</option>';
-            clauseSelect.disabled = true;
+            clauseSelect.disabled  = true;
         }
+        isMultiClauseMode = this.value !== '';
         checkGenerateEnabled();
+    });
+
+    clauseSelect.addEventListener('change', function() {
+        isMultiClauseMode = this.value === '';
     });
 
     // 프롬프트 생성
     generatePromptBtn.addEventListener('click', async function() {
         const selectedArticle = articleSelect.options[articleSelect.selectedIndex];
-        const selectedClause = clauseSelect.value ? clauseSelect.options[clauseSelect.selectedIndex] : null;
+        const selectedClause  = clauseSelect.value
+            ? clauseSelect.options[clauseSelect.selectedIndex]
+            : null;
 
         referenceData = {
-            agreement_id: parseInt(agreementSelect.value),
-            article_id: parseInt(articleSelect.value),
-            clause_id: clauseSelect.value ? parseInt(clauseSelect.value) : null,
-            term_sheet_text: termSheetText.value.trim(),
-            article_number: selectedArticle.dataset.number,
-            article_title: selectedArticle.dataset.title,
-            clause_number: selectedClause ? selectedClause.dataset.number : null,
-            clause_title: selectedClause ? selectedClause.dataset.title : null
+            agreement_id:          parseInt(agreementSelect.value),
+            article_id:            parseInt(articleSelect.value),
+            clause_id:             clauseSelect.value ? parseInt(clauseSelect.value) : null,
+            term_sheet_text:       termSheetText.value.trim(),
+            article_number:        selectedArticle.dataset.number,
+            article_title:         selectedArticle.dataset.title,
+            clause_number:         selectedClause ? selectedClause.dataset.number : null,
+            clause_title:          selectedClause ? selectedClause.dataset.title  : null,
         };
 
         generatePromptBtn.disabled = true;
@@ -238,27 +267,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     term_sheet_text: referenceData.term_sheet_text,
-                    agreement_id: referenceData.agreement_id,
-                    article_id: referenceData.article_id,
-                    clause_id: referenceData.clause_id
+                    agreement_id:    referenceData.agreement_id,
+                    article_id:      referenceData.article_id,
+                    clause_id:       referenceData.clause_id
                 })
             });
 
-            if (!response.ok) {
-                throw new Error('프롬프트 생성 실패');
-            }
+            if (!response.ok) throw new Error('프롬프트 생성 실패');
 
             const data = await response.json();
-            currentPrompt = data.prompt;
-            promptDisplay.textContent = currentPrompt;
+
+            // 섹션 먼저 표시
             step3Section.style.display = 'block';
-            aiCallRow.style.display = 'flex';
+            aiCallRow.style.display    = 'flex';
+
+            // 부모 레이아웃(너비)이 브라우저에 확정된 후 textarea 크기 계산
+            // void offsetWidth 로 강제 동기 리플로우 → 부모 너비 확정
+            void step3Section.offsetWidth;
+
+            promptDisplay.value = data.prompt;
+            autoResize(promptDisplay);
             step3Section.scrollIntoView({ behavior: 'smooth' });
 
         } catch (error) {
             alert('오류: ' + error.message);
         } finally {
-            generatePromptBtn.disabled = false;
+            generatePromptBtn.disabled    = false;
             generatePromptBtn.textContent = '프롬프트 생성';
             checkGenerateEnabled();
         }
@@ -266,15 +300,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 프롬프트 복사
     copyPromptBtn.addEventListener('click', function() {
-        navigator.clipboard.writeText(currentPrompt).then(() => {
+        navigator.clipboard.writeText(promptDisplay.value).then(() => {
             showCopyFeedback(copyPromptBtn);
         });
     });
 
     // 생성형AI 호출
     callAIBtn.addEventListener('click', async function() {
-        callAIBtn.disabled = true;
+        callAIBtn.disabled    = true;
         callAIBtn.textContent = 'AI 호출 중...';
+
+        // 점수/로그 초기화
+        currentLogId  = null;
+        selectedScore = null;
+        scoreBtns.forEach(b => b.classList.remove('selected'));
+        saveArticleBtn.disabled = true;
 
         try {
             const response = await fetch('/api/generated/generate-with-chatgpt', {
@@ -282,36 +322,45 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     generated_agreement_id: workAgreementId,
-                    term_sheet_text: referenceData.term_sheet_text,
-                    agreement_id: referenceData.agreement_id,
-                    article_id: referenceData.article_id,
-                    clause_id: referenceData.clause_id,
-                    skip_save: true  // 바로 저장하지 않고 결과만 받기
+                    term_sheet_text:        referenceData.term_sheet_text,
+                    agreement_id:           referenceData.agreement_id,
+                    article_id:             referenceData.article_id,
+                    clause_id:              referenceData.clause_id,
+                    skip_save:              true,
+                    custom_prompt:          promptDisplay.value   // 수정된 프롬프트
                 })
             });
 
             const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || 'AI 호출 실패');
 
-            if (!response.ok) {
-                throw new Error(data.detail || 'AI 호출 실패');
-            }
-
-            currentAIResult = data.ai_content;
+            currentAIResult    = data.ai_content;
+            currentLogId       = data.log_id;
             aiResultDisplay.innerHTML = formatAIResult(currentAIResult);
 
-            // 기본값 설정 (참조한 조/항 정보)
+            // 4단계 기본값 — 2단계 선택값 사용
             articleNumberInput.value = referenceData.article_number || '';
-            articleTitleInput.value = referenceData.article_title || '';
-            clauseTitleInput.value = referenceData.clause_title || referenceData.article_title || '';
+            articleTitleInput.value  = referenceData.article_title  || '';
+
+            if (isMultiClauseMode) {
+                clauseTitleInput.value       = '';
+                clauseTitleInput.disabled    = true;
+                clauseTitleInput.placeholder = '(AI 응답에서 자동 추출)';
+            } else {
+                // 항 선택한 경우 — 항 제목을 2단계 선택값으로 채움
+                clauseTitleInput.value       = referenceData.clause_title || '';
+                clauseTitleInput.disabled    = false;
+                clauseTitleInput.placeholder = '';
+            }
 
             step4Section.style.display = 'block';
-            saveRow.style.display = 'flex';
+            saveRow.style.display      = 'block';
             step4Section.scrollIntoView({ behavior: 'smooth' });
 
         } catch (error) {
             alert('오류: ' + error.message);
         } finally {
-            callAIBtn.disabled = false;
+            callAIBtn.disabled    = false;
             callAIBtn.textContent = '생성형AI 호출';
         }
     });
@@ -323,48 +372,114 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    // 점수 버튼 선택
+    scoreBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            scoreBtns.forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedScore = parseInt(btn.dataset.score);
+            saveArticleBtn.disabled = false;
+        });
+    });
+
     // 생성된 조항 추가
     saveArticleBtn.addEventListener('click', async function() {
+        if (!selectedScore) {
+            alert('평가 점수를 선택해주세요. (1~5점)');
+            return;
+        }
+
         const articleNumber = articleNumberInput.value.trim();
-        const articleTitle = articleTitleInput.value.trim();
-        const clauseTitle = clauseTitleInput.value.trim();
+        const articleTitle  = articleTitleInput.value.trim();
+        const clauseTitle   = clauseTitleInput.value.trim();
 
         if (!articleNumber) {
             alert('조번호를 입력해주세요.');
             return;
         }
 
-        saveArticleBtn.disabled = true;
+        saveArticleBtn.disabled    = true;
         saveArticleBtn.textContent = '저장 중...';
 
-        // article_number 숫자 추출
         let articleNumberInt = null;
-        const numberMatch = articleNumber.match(/\d+/);
-        if (numberMatch) {
-            articleNumberInt = parseInt(numberMatch[0]);
+        const numMatch = articleNumber.match(/\d+/);
+        if (numMatch) articleNumberInt = parseInt(numMatch[0]);
+
+        const clauseNumInt     = referenceData.clause_number ? (parseInt(referenceData.clause_number) || 1) : null;
+        const clauseNumDisplay = referenceData.clause_number || null;
+
+        // ── 중복 조 확인 ──
+        let targetArticleId = null;
+        try {
+            const articlesResp = await fetch(`/api/generated/${workAgreementId}/articles`);
+            if (articlesResp.ok) {
+                const existingArticles = await articlesResp.json();
+                const dupArticle = existingArticles.find(a => a.article_number_display === articleNumber);
+
+                if (dupArticle) {
+                    if (isMultiClauseMode) {
+                        // 다중 항 모드: 조가 존재하면 덮어쓸지 확인
+                        if (!confirm(`제${articleNumber}조는 이미 존재합니다. 덮어쓸까요?`)) {
+                            saveArticleBtn.disabled    = false;
+                            saveArticleBtn.textContent = '생성된조항추가';
+                            return;
+                        }
+                        targetArticleId = dupArticle.id;
+                    } else {
+                        // 단일 항 모드: 해당 항이 이미 존재하는지 추가 확인
+                        const detailResp = await fetch(`/api/generated/${workAgreementId}/articles/${dupArticle.id}`);
+                        if (detailResp.ok) {
+                            const articleDetail = await detailResp.json();
+                            const clauseExists  = clauseNumDisplay &&
+                                articleDetail.clauses.some(c => c.clause_number_display === clauseNumDisplay);
+
+                            if (clauseExists) {
+                                // 동일 항도 존재 → 덮어쓸지 확인
+                                if (!confirm(`제${clauseNumDisplay}항이 이미 존재합니다. 덮어쓸까요?`)) {
+                                    saveArticleBtn.disabled    = false;
+                                    saveArticleBtn.textContent = '생성된조항추가';
+                                    return;
+                                }
+                            }
+                            // 항이 없으면 조용히 기존 조에 붙임 (확인 불필요)
+                            targetArticleId = dupArticle.id;
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            // 중복 확인 실패 시 무시하고 신규 생성으로 계속 진행
+            console.warn('중복 조 확인 실패:', e);
         }
 
+        // ── 저장 API 호출 ──
         try {
             const response = await fetch('/api/generated/save-ai-result', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     generated_agreement_id: workAgreementId,
-                    article_number: articleNumberInt,
+                    article_number:         articleNumberInt,
                     article_number_display: articleNumber,
-                    article_title: articleTitle,
-                    clause_title: clauseTitle,
-                    ref_agreement_id: referenceData.agreement_id,
-                    ref_article_id: referenceData.article_id,
-                    ref_clause_id: referenceData.clause_id,
-                    term_sheet_text: referenceData.term_sheet_text,
-                    ai_content: currentAIResult
+                    article_title:          articleTitle,
+                    clause_title:           clauseTitle,
+                    clause_number:          clauseNumInt,
+                    clause_number_display:  clauseNumDisplay,
+                    ref_agreement_id:       referenceData.agreement_id,
+                    ref_article_id:         referenceData.article_id,
+                    ref_clause_id:          referenceData.clause_id,
+                    term_sheet_text:        referenceData.term_sheet_text,
+                    ai_content:             currentAIResult,
+                    multi_clause_mode:      isMultiClauseMode,
+                    log_id:                 currentLogId,
+                    score:                  selectedScore,
+                    target_article_id:      targetArticleId
                 })
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || '저장 실패');
+                const err = await response.json();
+                throw new Error(err.detail || '저장 실패');
             }
 
             alert('조항이 추가되었습니다.');
@@ -373,22 +488,90 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             alert('오류: ' + error.message);
         } finally {
-            saveArticleBtn.disabled = false;
+            saveArticleBtn.disabled    = false;
             saveArticleBtn.textContent = '생성된조항추가';
         }
     });
 
+    // ── 유틸 ──────────────────────────────────────────
+
+    // AI 응답(JSON 또는 텍스트)을 파싱하여 항 배열로 반환
+    // 파싱 실패 시 null 반환
+    function parseAIJsonClauses(text) {
+        if (!text) return null;
+
+        let jsonStr = null;
+
+        // 1순위: ```json ... ``` 블록
+        const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)```/);
+        if (jsonBlockMatch) {
+            jsonStr = jsonBlockMatch[1].trim();
+        }
+
+        // 2순위: ``` ... ``` 블록에서 [ 로 시작하는 경우
+        if (!jsonStr) {
+            const codeBlockMatch = text.match(/```\s*([\s\S]*?)```/);
+            if (codeBlockMatch && codeBlockMatch[1].trim().startsWith('[')) {
+                jsonStr = codeBlockMatch[1].trim();
+            }
+        }
+
+        // 3순위: 텍스트 내 [ ... ] 배열 패턴 직접 탐색
+        if (!jsonStr) {
+            const directMatch = text.match(/(\[[\s\S]*\])/);
+            if (directMatch) {
+                jsonStr = directMatch[1];
+            }
+        }
+
+        if (!jsonStr) return null;
+
+        try {
+            const parsed = JSON.parse(jsonStr);
+            if (!Array.isArray(parsed) || parsed.length === 0) return null;
+            return parsed;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // 4단계 표시용: JSON이면 파싱하여 사람이 읽기 좋은 형태로, 아니면 텍스트 그대로
     function formatAIResult(text) {
-        // 줄바꿈을 <br>로 변환
+        if (!text) return '';
+
+        const clauses = parseAIJsonClauses(text);
+
+        if (clauses) {
+            return clauses.map(item => {
+                const num     = item.clause_number || '';
+                const title   = item.clause_title || item.title || '';
+                const content = item.content || '';
+
+                let headerText = '';
+                if (num && title)  headerText = `제${num}항 ${title}`;
+                else if (num)      headerText = `제${num}항`;
+                else if (title)    headerText = title;
+
+                const headerHtml = headerText
+                    ? `<p class="parsed-clause-header">${escapeHtml(headerText)}</p>` : '';
+
+                const contentHtml = content
+                    .split('\n')
+                    .map(line => `<p>${escapeHtml(line) || '&nbsp;'}</p>`)
+                    .join('');
+
+                return `<div class="parsed-clause">${headerHtml}${contentHtml}</div>`;
+            }).join('');
+        }
+
+        // 폴백: 텍스트 그대로 줄바꿈 처리
         return text.split('\n').map(line => `<p>${escapeHtml(line) || '&nbsp;'}</p>`).join('');
     }
 
     function showCopyFeedback(btn) {
-        const originalHTML = btn.innerHTML;
+        const orig = btn.innerHTML;
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
-        setTimeout(() => {
-            btn.innerHTML = originalHTML;
-        }, 1500);
+        setTimeout(() => { btn.innerHTML = orig; }, 1500);
     }
 
     function escapeHtml(text) {
@@ -398,7 +581,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return div.innerHTML;
     }
 
-    // 초기 로드
     loadAgreements();
 });
 </script>

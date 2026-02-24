@@ -16,6 +16,10 @@
             <div class="nav-menu">
                 <a href="/" class="nav-link {% block nav_reference %}{% endblock %}">기준약정서</a>
                 <a href="/work" class="nav-link {% block nav_work %}{% endblock %}">작업약정서</a>
+                {% if username %}
+                <span class="nav-user">{{ username }}</span>
+                <a href="/logout" class="nav-link nav-logout">로그아웃</a>
+                {% endif %}
             </div>
         </nav>
     </header>

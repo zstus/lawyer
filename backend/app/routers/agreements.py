@@ -6,6 +6,7 @@ from typing import List
 from ..database import get_db
 from .. import crud, schemas, models
 from ..parser import parse_docx_bytes
+from ..services.prompt_service import build_generation_prompt
 
 router = APIRouter(prefix="/api/agreements", tags=["agreements"])
 
@@ -300,10 +301,9 @@ def generate_prompt(
         })
 
     # 6. 프롬프트 생성
-    prompt = _build_generation_prompt(
+    prompt = build_generation_prompt(
         term_sheet_text=request.term_sheet_text,
         agreement_name=agreement.name,
-        article_info=reference_article,
         clause_structure=clause_structure
     )
 
@@ -314,54 +314,3 @@ def generate_prompt(
     )
 
 
-def _build_generation_prompt(
-    term_sheet_text: str,
-    agreement_name: str,
-    article_info: str,
-    clause_structure: list
-) -> str:
-    """대출약정서 조항 생성을 위한 프롬프트 구성"""
-
-    # 항 구조 텍스트 생성
-    clause_examples = []
-    for clause in clause_structure:
-        example = f"""### 제{clause['number']}항 {clause['title']}
-{clause['content']}"""
-        clause_examples.append(example)
-
-    clause_structure_text = "\n\n".join(clause_examples)
-
-    prompt = f"""당신은 대출약정서 작성 전문가입니다. 아래 Term Sheet 정보를 바탕으로 대출약정서의 조항을 작성해주세요.
-
-## 작성 지침
-
-1. **참조 문서**: "{agreement_name}"
-2. **참조 조항**: {article_info}
-3. 참조 조항의 **구조와 형식**을 그대로 따라 작성하되, Term Sheet의 정보를 반영하세요.
-4. 법률 문서 특유의 정확하고 명확한 문체를 유지하세요.
-5. 조항 번호, 항 번호 체계를 유지하세요.
-
----
-
-## Term Sheet 정보
-
-{term_sheet_text}
-
----
-
-## 참조 조항 구조 (이 구조를 따라 작성)
-
-{clause_structure_text}
-
----
-
-## 작성 요청
-
-위의 Term Sheet 정보를 반영하여, 참조 조항과 동일한 구조로 새로운 "{article_info}" 조항을 작성해주세요.
-
-- 각 항의 제목과 구조는 참조 조항을 따르세요.
-- 구체적인 수치, 날짜, 조건 등은 Term Sheet 정보를 사용하세요.
-- Term Sheet에 없는 정보는 "[확인 필요]"로 표시하세요.
-"""
-
-    return prompt

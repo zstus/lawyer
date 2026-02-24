@@ -123,11 +123,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            container.innerHTML = article.clauses.map(clause => `
+            // clause_number 오름차순 정렬 (number 없는 항은 뒤로)
+            const sortedClauses = [...article.clauses].sort((a, b) => (a.clause_number ?? 9999) - (b.clause_number ?? 9999));
+
+            container.innerHTML = sortedClauses.map(clause => `
                 <div class="accordion-clause" data-clause-id="${clause.id}">
                     <div class="accordion-clause-header" onclick="toggleClause(this)">
                         <span class="clause-label">${clause.clause_number_display ? `제${clause.clause_number_display}항` : '(번호 미지정)'}</span>
                         <span class="clause-title">${escapeHtml(clause.title || '(제목 없음)')}</span>
+                        ${clause.score ? `<span class="clause-score">(${clause.score}점)</span>` : ''}
                         <span class="clause-date">생성일 ${formatDate(clause.created_at)}</span>
                         <button class="btn-delete btn-delete-small" onclick="event.stopPropagation(); deleteClause(${articleId}, ${clause.id})" title="항 삭제">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

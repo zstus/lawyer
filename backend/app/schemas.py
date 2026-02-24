@@ -129,6 +129,7 @@ class GeneratedClauseBase(BaseModel):
     content: Optional[str] = None
     order_index: int = 0
     ref_clause_id: Optional[int] = None
+    score: Optional[int] = None  # 담당자 평가 점수 (1-5)
 
 
 class GeneratedClauseCreate(GeneratedClauseBase):
@@ -237,6 +238,12 @@ class SaveAIResultRequest(BaseModel):
     ref_clause_id: Optional[int] = None  # 참조한 원본 항 ID
     term_sheet_text: Optional[str] = None  # 사용된 Term Sheet
     ai_content: str  # AI 생성 내용
+    multi_clause_mode: bool = False  # True면 AI 응답을 파싱하여 다중 항 저장
+    clause_number: Optional[int] = None          # 저장할 항 번호
+    clause_number_display: Optional[str] = None  # 저장할 항 번호 표시용
+    log_id: Optional[int] = None  # 연결된 AI 호출 로그 ID
+    score: Optional[int] = None  # 평가 점수 (1-5)
+    target_article_id: Optional[int] = None  # 기존 조 ID (있으면 해당 조에 항 추가)
 
 
 # ===== ChatGPT 호출 스키마 =====
@@ -249,6 +256,7 @@ class ChatGPTGenerateRequest(BaseModel):
     article_id: int  # 참조할 조 ID
     clause_id: Optional[int] = None  # 참조할 항 ID (선택적)
     skip_save: bool = False  # True면 저장하지 않고 결과만 반환
+    custom_prompt: Optional[str] = None  # 사용자가 수정한 프롬프트 (있으면 이걸 사용)
 
 
 class ChatGPTGenerateResponse(BaseModel):
@@ -259,3 +267,11 @@ class ChatGPTGenerateResponse(BaseModel):
     reference_article: str  # 참조된 조 정보
     ai_content: str  # AI 생성 내용
     message: str  # 결과 메시지
+    log_id: Optional[int] = None  # 생성된 AI 호출 로그 ID
+
+
+# ===== AI 로그 점수 업데이트 스키마 =====
+
+class AILogScoreUpdate(BaseModel):
+    """AI 로그 점수 업데이트 요청"""
+    score: int  # 1-5

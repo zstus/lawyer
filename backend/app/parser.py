@@ -406,3 +406,156 @@ def _save_clause_content(articles: List[ParsedArticle], clause_data: dict, lines
                     content=_format_content(lines),
                     order_index=old_clause.order_index
                 )
+
+
+# ===== AI 생성 응답 파싱 =====
+
+import json as json_module
+
+
+def extract_plain_text_from_ai_response(ai_content: str) -> str:
+    """AI 응답(JSON 배열 또는 순수 텍스트)에서 순수 텍스트만 추출
+
+    AI가 JSON 배열로 응답한 경우 각 항의 content를 합쳐서 반환.
+    JSON이 아닌 경우 입력을 그대로 반환.
+
+    Args:
+        ai_content: AI가 생성한 텍스트
+
+    Returns:
+        순수 텍스트 (저장용)
+    """
+    json_str = _extract_json_from_response(ai_content)
+    if json_str:
+        try:
+            parsed = json_module.loads(json_str)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                parts = []
+                for item in parsed:
+                    content = item.get('content', '').strip()
+                    if content:
+                        parts.append(content)
+                if parts:
+                    return '\n\n'.join(parts)
+        except json_module.JSONDecodeError:
+            pass
+    return ai_content.strip()
+
+
+def parse_ai_generated_clauses(ai_content: str) -> List[dict]:
+    """AI 생성 응답에서 다중 항을 파싱 (JSON 형식)
+
+    AI가 JSON 형식으로 여러 항을 반환한 경우, 파싱하여 반환합니다.
+
+    Args:
+        ai_content: AI가 생성한 텍스트 (JSON 형식)
+
+    Returns:
+        파싱된 항 목록. 각 항은 다음 필드를 포함:
+        - clause_number: int (항 번호)
+        - clause_number_display: str (표시용 항 번호)
+        - title: str (항 제목)
+        - content: str (항 내용)
+
+    JSON 파싱 실패 시 전체를 단일 항으로 처리합니다.
+    """
+    # JSON 블록 추출 (```json ... ``` 또는 [ ... ])
+    json_str = _extract_json_from_response(ai_content)
+
+    if json_str:
+        try:
+            parsed = json_module.loads(json_str)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                clauses = []
+                for item in parsed:
+                    clause_num = item.get('clause_number', 1)
+                    clauses.append({
+                        'clause_number': int(clause_num) if isinstance(clause_num, (int, str)) and str(clause_num).isdigit() else 1,
+                        'clause_number_display': str(clause_num),
+                        'title': item.get('clause_title', ''),
+                        'content': item.get('content', '')
+                    })
+                return clauses
+        except json_module.JSONDecodeError:
+            pass
+
+    # JSON 파싱 실패 시 기존 마크다운 패턴 시도
+    clauses = _parse_markdown_clauses(ai_content)
+    if clauses:
+        return clauses
+
+    # 모든 파싱 실패 시 전체를 단일 항으로 처리
+    return [{
+        'clause_number': 1,
+        'clause_number_display': '1',
+        'title': '',
+        'content': ai_content.strip()
+    }]
+
+
+def _extract_json_from_response(text: str) -> Optional[str]:
+    """AI 응답에서 JSON 부분 추출
+
+    ```json ... ``` 블록 또는 [ ... ] 배열을 찾습니다.
+    """
+    # ```json ... ``` 블록 찾기
+    json_block_pattern = re.compile(r'```json\s*([\s\S]*?)\s*```', re.IGNORECASE)
+    match = json_block_pattern.search(text)
+    if match:
+        return match.group(1).strip()
+
+    # ``` ... ``` 블록 찾기 (json 키워드 없이)
+    code_block_pattern = re.compile(r'```\s*([\s\S]*?)\s*```')
+    match = code_block_pattern.search(text)
+    if match:
+        content = match.group(1).strip()
+        if content.startswith('['):
+            return content
+
+    # [ ... ] 배열 직접 찾기
+    array_pattern = re.compile(r'\[\s*\{[\s\S]*\}\s*\]')
+    match = array_pattern.search(text)
+    if match:
+        return match.group(0)
+
+    return None
+
+
+# 기존 마크다운 패턴 (폴백용)
+AI_CLAUSE_HEADER_PATTERN = re.compile(
+    r'^(?:###?\s*)?제[\s\t]*(\d+)[\s\t]*항[\s\t]*(.{1,100})$'
+)
+
+
+def _parse_markdown_clauses(ai_content: str) -> List[dict]:
+    """마크다운 형식의 AI 응답 파싱 (폴백)"""
+    lines = ai_content.split('\n')
+    clauses = []
+    current_clause = None
+    content_lines = []
+
+    for line in lines:
+        match = AI_CLAUSE_HEADER_PATTERN.match(line.strip())
+        if match:
+            if current_clause is not None:
+                current_clause['content'] = '\n'.join(content_lines).strip()
+                clauses.append(current_clause)
+                content_lines = []
+
+            clause_num = int(match.group(1))
+            title = clean_title(match.group(2))
+
+            current_clause = {
+                'clause_number': clause_num,
+                'clause_number_display': str(clause_num),
+                'title': title,
+                'content': ''
+            }
+        elif current_clause is not None:
+            content_lines.append(line)
+
+    if current_clause is not None:
+        current_clause['content'] = '\n'.join(content_lines).strip()
+        clauses.append(current_clause)
+
+    return clauses

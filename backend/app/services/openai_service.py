@@ -26,6 +26,14 @@ def get_model() -> str:
     return os.getenv("OPENAI_MODEL", "gpt-4o")
 
 
+def get_max_tokens(model: str) -> int:
+    """모델별 최대 출력 토큰 반환"""
+    # gpt-4o 계열은 16384, 나머지는 4096
+    if "gpt-4o" in model:
+        return 16000
+    return 4096
+
+
 async def generate_article_content(prompt: str) -> str:
     """
     프롬프트를 기반으로 대출약정서 조항 내용 생성
@@ -38,6 +46,7 @@ async def generate_article_content(prompt: str) -> str:
     """
     client = get_openai_client()
     model = get_model()
+    max_tokens = get_max_tokens(model)
 
     response = client.chat.completions.create(
         model=model,
@@ -52,7 +61,7 @@ async def generate_article_content(prompt: str) -> str:
             }
         ],
         temperature=0.3,  # 일관성 있는 법률 문서 생성을 위해 낮은 temperature
-        max_tokens=4000
+        max_tokens=max_tokens
     )
 
     return response.choices[0].message.content

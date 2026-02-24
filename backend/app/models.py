@@ -6,6 +6,19 @@ from datetime import datetime, timezone
 from .database import Base
 
 
+class User(Base):
+    """사용자 테이블"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<User(id={self.id}, username='{self.username}')>"
+
+
 class LoanAgreement(Base):
     """대출약정서 기본 정보 테이블"""
     __tablename__ = "loan_agreements"
@@ -128,8 +141,9 @@ class GeneratedClause(Base):
     clause_number = Column(Integer, nullable=True)  # 항 번호
     clause_number_display = Column(String(20), nullable=True)  # 표시용
     title = Column(String(500), nullable=True, index=True)  # 항 제목
-    content = Column(Text, nullable=True)  # AI 생성 내용 (JSON 또는 텍스트)
+    content = Column(Text, nullable=True)  # AI 생성 내용
     order_index = Column(Integer, nullable=False, default=0)  # 정렬 순서
+    score = Column(Integer, nullable=True)  # 담당자 평가 점수 (1-5)
 
     # 참조 정보
     ref_clause_id = Column(Integer, nullable=True)  # 참조한 원본 항
@@ -143,3 +157,26 @@ class GeneratedClause(Base):
 
     def __repr__(self):
         return f"<GeneratedClause(id={self.id}, number={self.clause_number_display}, title='{self.title}')>"
+
+
+class AIGenerationLog(Base):
+    """AI 생성 호출 로그 테이블"""
+    __tablename__ = "ai_generation_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), nullable=True, index=True)       # 작성자 ID
+    generated_agreement_id = Column(Integer, nullable=True)         # 작업 약정서 ID
+    ref_agreement_id = Column(Integer, nullable=True)               # 참조 대출약정서 ID
+    ref_article_id = Column(Integer, nullable=True)                 # 참조 조 ID
+    ref_clause_id = Column(Integer, nullable=True)                  # 참조 항 ID (nullable)
+    ref_agreement_name = Column(String(500), nullable=True)         # 참조 약정서명
+    ref_article_title = Column(String(500), nullable=True)          # 참조 조 제목
+    ref_clause_title = Column(String(500), nullable=True)           # 참조 항 제목
+    called_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))  # AI 호출 시간
+    used_prompt = Column(Text, nullable=True)                       # 사용된 프롬프트 전체
+    ai_response = Column(Text, nullable=True)                       # AI 리턴값
+    score = Column(Integer, nullable=True)                          # 평가 점수 1-5 (생성 시 비어있음)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<AIGenerationLog(id={self.id}, username='{self.username}', score={self.score})>"
